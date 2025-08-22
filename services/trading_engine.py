@@ -12,9 +12,10 @@ from .market_rules import MarketRulesEngine
 class TradingEngine:
     """交易引擎"""
     
-    def __init__(self, storage: DataStorage):
+    def __init__(self, storage: DataStorage, stock_service=None):
         self.storage = storage
         self.market_rules = MarketRulesEngine(storage)
+        self.stock_service = stock_service  # 依赖注入，避免循环依赖
     
     async def place_buy_order(self, user_id: str, stock_code: str, volume: int, 
                             price: Optional[float] = None) -> Tuple[bool, str, Optional[Order]]:
@@ -27,9 +28,10 @@ class TradingEngine:
         user = User.from_dict(user_data)
         
         # 2. 获取股票信息
-        from .stock_data import StockDataService
-        stock_service = StockDataService(self.storage)
-        stock_info = await stock_service.get_stock_info(stock_code)
+        if not self.stock_service:
+            from .stock_data import StockDataService
+            self.stock_service = StockDataService(self.storage)
+        stock_info = await self.stock_service.get_stock_info(stock_code)
         
         if not stock_info:
             return False, f"无法获取股票{stock_code}的信息", None
@@ -61,21 +63,21 @@ class TradingEngine:
             update_time=0   # 将在__post_init__中生成
         )
         
-        # 5. 验证订单
+        # 5. 市场规则验证（包含涨停跌停检查）
         is_valid, error_msg = self.market_rules.validate_buy_order(stock_info, order, user.balance)
         if not is_valid:
             return False, error_msg, None
         
-        # 6. 处理订单
+        # 6. 处理订单（简化逻辑）
         if order.is_market_order():
-            # 市价单立即成交
+            # 市价单立即按当前价格成交
+            order.order_price = stock_info.current_price
             return await self._execute_buy_order_immediately(user, order, stock_info)
         else:
             # 限价单检查是否能立即成交
-            if stock_info.current_price <= order.order_price:
-                # 可以立即成交
-                actual_price = min(order.order_price, stock_info.get_market_buy_price())
-                order.order_price = actual_price
+            if order.order_price >= stock_info.current_price:
+                # 可以立即成交，使用当前价格
+                order.order_price = stock_info.current_price
                 return await self._execute_buy_order_immediately(user, order, stock_info)
             else:
                 # 挂单等待
@@ -96,9 +98,10 @@ class TradingEngine:
         position = Position.from_dict(position_data) if position_data else None
         
         # 3. 获取股票信息
-        from .stock_data import StockDataService
-        stock_service = StockDataService(self.storage)
-        stock_info = await stock_service.get_stock_info(stock_code)
+        if not self.stock_service:
+            from .stock_data import StockDataService
+            self.stock_service = StockDataService(self.storage)
+        stock_info = await self.stock_service.get_stock_info(stock_code)
         
         if not stock_info:
             return False, f"无法获取股票{stock_code}的信息", None
@@ -130,21 +133,21 @@ class TradingEngine:
             update_time=0
         )
         
-        # 6. 验证订单
+        # 6. 市场规则验证（包含涨停跌停检查）
         is_valid, error_msg = self.market_rules.validate_sell_order(stock_info, order, position)
         if not is_valid:
             return False, error_msg, None
         
-        # 7. 处理订单
+        # 7. 处理订单（简化逻辑）
         if order.is_market_order():
-            # 市价单立即成交
+            # 市价单立即按当前价格成交
+            order.order_price = stock_info.current_price
             return await self._execute_sell_order_immediately(user, order, position, stock_info)
         else:
             # 限价单检查是否能立即成交
-            if stock_info.current_price >= order.order_price:
-                # 可以立即成交
-                actual_price = max(order.order_price, stock_info.get_market_sell_price())
-                order.order_price = actual_price
+            if order.order_price <= stock_info.current_price:
+                # 可以立即成交，使用当前价格
+                order.order_price = stock_info.current_price
                 return await self._execute_sell_order_immediately(user, order, position, stock_info)
             else:
                 # 挂单等待

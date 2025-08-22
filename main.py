@@ -1,7 +1,8 @@
 """A股模拟交易插件"""
 import time
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register
+from astrbot.api.event import AstrMessageEvent, MessageEventResult
+from astrbot.api.event.filter import command
+from astrbot.api.star import Context, Star
 from astrbot.api import logger
 
 # 导入本地模块
@@ -14,17 +15,16 @@ from .services.trading_engine import TradingEngine
 from .services.order_monitor import OrderMonitorService
 
 
-@register("papertrading", "AI Assistant", "A股模拟交易插件，支持实时买卖、挂单交易、持仓查询、群内排行等功能。", "1.0.0")
 class PaperTradingPlugin(Star):
-    """A股模拟交易插件主类"""
+    """A股模拟交易插件，支持实时买卖、挂单交易、持仓查询、群内排行等功能。"""
     
     def __init__(self, context: Context):
         super().__init__(context)
         
-        # 初始化服务
+        # 初始化服务（使用依赖注入）
         self.storage = DataStorage("papertrading")
         self.stock_service = StockDataService(self.storage)
-        self.trading_engine = TradingEngine(self.storage)
+        self.trading_engine = TradingEngine(self.storage, self.stock_service)
         self.order_monitor = OrderMonitorService(self.storage)
         
         logger.info("A股模拟交易插件初始化完成")
@@ -90,7 +90,7 @@ class PaperTradingPlugin(Star):
 
     # ==================== 用户注册相关 ====================
     
-    @filter.command("股票注册")
+    @command("股票注册")
     async def register_user(self, event: AstrMessageEvent):
         """用户注册"""
         user_id = event.get_sender_id()
@@ -99,7 +99,7 @@ class PaperTradingPlugin(Star):
         # 检查是否已注册
         existing_user = self.storage.get_user(user_id)
         if existing_user:
-            yield event.plain_result("您已经注册过了！使用 /我的账户 查看账户信息")
+            yield MessageEventResult().message("您已经注册过了！使用 /我的账户 查看账户信息")
             return
         
         # 创建新用户
@@ -118,7 +118,7 @@ class PaperTradingPlugin(Star):
         # 保存用户
         self.storage.save_user(user_id, user.to_dict())
         
-        yield event.plain_result(
+        yield MessageEventResult().message(
             f"🎉 注册成功！\n"
             f"👤 用户名: {user_name}\n"
             f"💰 初始资金: {Formatters.format_currency(initial_balance)}元\n\n"
@@ -127,7 +127,7 @@ class PaperTradingPlugin(Star):
 
     # ==================== 交易相关 ====================
     
-    @filter.command("买入")
+    @command("买入")
     async def buy_stock(self, event: AstrMessageEvent):
         """买入股票"""
         user_id = event.get_sender_id()
@@ -137,7 +137,7 @@ class PaperTradingPlugin(Star):
         parsed = Validators.parse_order_params(params)
         
         if parsed['error']:
-            yield event.plain_result(f"❌ {parsed['error']}\n\n格式: /买入 股票代码 数量 [价格]\n例: /买入 000001 1000 12.50")
+            yield MessageEventResult().message(f"❌ {parsed['error']}\n\n格式: /买入 股票代码 数量 [价格]\n例: /买入 000001 1000 12.50")
             return
         
         # 执行买入
@@ -150,15 +150,15 @@ class PaperTradingPlugin(Star):
             )
             
             if success:
-                yield event.plain_result(f"✅ {message}")
+                yield MessageEventResult().message(f"✅ {message}")
             else:
-                yield event.plain_result(f"❌ {message}")
+                yield MessageEventResult().message(f"❌ {message}")
                 
         except Exception as e:
             logger.error(f"买入操作失败: {e}")
-            yield event.plain_result("❌ 交易失败，请稍后重试")
+            yield MessageEventResult().message("❌ 交易失败，请稍后重试")
     
-    @filter.command("卖出")
+    @command("卖出")
     async def sell_stock(self, event: AstrMessageEvent):
         """卖出股票"""
         user_id = event.get_sender_id()
@@ -168,7 +168,7 @@ class PaperTradingPlugin(Star):
         parsed = Validators.parse_order_params(params)
         
         if parsed['error']:
-            yield event.plain_result(f"❌ {parsed['error']}\n\n格式: /卖出 股票代码 数量 [价格]\n例: /卖出 000001 500 13.00")
+            yield MessageEventResult().message(f"❌ {parsed['error']}\n\n格式: /卖出 股票代码 数量 [价格]\n例: /卖出 000001 500 13.00")
             return
         
         # 执行卖出
@@ -181,22 +181,22 @@ class PaperTradingPlugin(Star):
             )
             
             if success:
-                yield event.plain_result(f"✅ {message}")
+                yield MessageEventResult().message(f"✅ {message}")
             else:
-                yield event.plain_result(f"❌ {message}")
+                yield MessageEventResult().message(f"❌ {message}")
                 
         except Exception as e:
             logger.error(f"卖出操作失败: {e}")
-            yield event.plain_result("❌ 交易失败，请稍后重试")
+            yield MessageEventResult().message("❌ 交易失败，请稍后重试")
     
-    @filter.command("撤单")
+    @command("撤单")
     async def cancel_order(self, event: AstrMessageEvent):
         """撤销订单"""
         user_id = event.get_sender_id()
         params = event.message_str.strip().split()[1:]
         
         if not params:
-            yield event.plain_result("❌ 请提供订单号\n格式: /撤单 订单号")
+            yield MessageEventResult().message("❌ 请提供订单号\n格式: /撤单 订单号")
             return
         
         order_id = params[0]
@@ -205,17 +205,17 @@ class PaperTradingPlugin(Star):
             success, message = await self.trading_engine.cancel_order(user_id, order_id)
             
             if success:
-                yield event.plain_result(f"✅ {message}")
+                yield MessageEventResult().message(f"✅ {message}")
             else:
-                yield event.plain_result(f"❌ {message}")
+                yield MessageEventResult().message(f"❌ {message}")
                 
         except Exception as e:
             logger.error(f"撤单操作失败: {e}")
-            yield event.plain_result("❌ 撤单失败，请稍后重试")
+            yield MessageEventResult().message("❌ 撤单失败，请稍后重试")
 
     # ==================== 查询相关 ====================
     
-    @filter.command("我的账户")
+    @command("我的账户")
     async def show_account_info(self, event: AstrMessageEvent):
         """显示账户信息（合并持仓、余额、订单查询）"""
         user_id = event.get_sender_id()
@@ -223,7 +223,7 @@ class PaperTradingPlugin(Star):
         # 检查用户是否注册
         user_data = self.storage.get_user(user_id)
         if not user_data:
-            yield event.plain_result("❌ 您还未注册，请先使用 /股票注册 注册账户")
+            yield MessageEventResult().message("❌ 您还未注册，请先使用 /股票注册 注册账户")
             return
         
         try:
@@ -256,39 +256,39 @@ class PaperTradingPlugin(Star):
             if pending_orders:
                 info_text += "\n\n" + Formatters.format_pending_orders(pending_orders)
             
-            yield event.plain_result(info_text)
+            yield MessageEventResult().message(info_text)
             
         except Exception as e:
             logger.error(f"查询账户信息失败: {e}")
-            yield event.plain_result("❌ 查询失败，请稍后重试")
+            yield MessageEventResult().message("❌ 查询失败，请稍后重试")
     
-    @filter.command("股价")
+    @command("股价")
     async def show_stock_price(self, event: AstrMessageEvent):
         """查询股价"""
         params = event.message_str.strip().split()[1:]
         
         if not params:
-            yield event.plain_result("❌ 请提供股票代码\n格式: /股价 股票代码\n例: /股价 000001")
+            yield MessageEventResult().message("❌ 请提供股票代码\n格式: /股价 股票代码\n例: /股价 000001")
             return
         
         stock_code = Validators.normalize_stock_code(params[0])
         if not stock_code:
-            yield event.plain_result(f"❌ 无效的股票代码: {params[0]}")
+            yield MessageEventResult().message(f"❌ 无效的股票代码: {params[0]}")
             return
         
         try:
             stock_info = await self.stock_service.get_stock_info(stock_code)
             if stock_info:
                 info_text = Formatters.format_stock_info(stock_info.to_dict())
-                yield event.plain_result(info_text)
+                yield MessageEventResult().message(info_text)
             else:
-                yield event.plain_result(f"❌ 无法获取股票 {stock_code} 的信息")
+                yield MessageEventResult().message(f"❌ 无法获取股票 {stock_code} 的信息")
                 
         except Exception as e:
             logger.error(f"查询股价失败: {e}")
-            yield event.plain_result("❌ 查询失败，请稍后重试")
+            yield MessageEventResult().message("❌ 查询失败，请稍后重试")
     
-    @filter.command("排行")
+    @command("排行")
     async def show_ranking(self, event: AstrMessageEvent):
         """显示群内排行榜"""
         try:
@@ -304,19 +304,19 @@ class PaperTradingPlugin(Star):
             
             current_user_id = event.get_sender_id()
             ranking_text = Formatters.format_ranking(users_list, current_user_id)
-            yield event.plain_result(ranking_text)
+            yield MessageEventResult().message(ranking_text)
             
         except Exception as e:
             logger.error(f"查询排行榜失败: {e}")
-            yield event.plain_result("❌ 查询失败，请稍后重试")
+            yield MessageEventResult().message("❌ 查询失败，请稍后重试")
 
     # ==================== 帮助信息 ====================
     
-    @filter.command("帮助")
+    @command("帮助")
     async def show_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         help_text = Formatters.format_help_message()
-        yield event.plain_result(help_text)
+        yield MessageEventResult().message(help_text)
 
     # ==================== 插件生命周期 ====================
     

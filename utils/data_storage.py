@@ -4,6 +4,7 @@ import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from astrbot.api.star import StarTools
+from astrbot.api import logger
 
 
 class DataStorage:
@@ -53,7 +54,7 @@ class DataStorage:
                     return json.load(f)
             return {}
         except Exception as e:
-            print(f"加载文件失败 {filename}: {e}")
+            logger.error(f"加载文件失败 {filename}: {e}")
             return {}
     
     def _save_json(self, filename: str, data: Dict[str, Any]):
@@ -63,7 +64,7 @@ class DataStorage:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存文件失败 {filename}: {e}")
+            logger.error(f"保存文件失败 {filename}: {e}")
     
     # 用户数据操作
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:

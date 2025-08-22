@@ -44,7 +44,11 @@ class MarketRulesEngine:
         if stock_info.is_suspended:
             return False, f"{stock_info.name}当前停牌，无法交易"
         
-        # 2. 检查价格是否超出涨跌停
+        # 2. 检查涨跌停限制：涨停时不能买入
+        if stock_info.is_limit_up():
+            return False, f"{stock_info.name}已涨停，无法买入"
+        
+        # 3. 检查价格是否超出涨跌停
         if not stock_info.can_buy_at_price(order.order_price):
             return False, f"买入价格{order.order_price:.2f}超出涨停价{stock_info.limit_up:.2f}"
         
@@ -73,7 +77,11 @@ class MarketRulesEngine:
         if stock_info.is_suspended:
             return False, f"{stock_info.name}当前停牌，无法交易"
         
-        # 3. 检查价格是否超出涨跌停
+        # 3. 检查涨跌停限制：跌停时不能卖出
+        if stock_info.is_limit_down():
+            return False, f"{stock_info.name}已跌停，无法卖出"
+        
+        # 4. 检查价格是否超出涨跌停
         if not stock_info.can_sell_at_price(order.order_price):
             return False, f"卖出价格{order.order_price:.2f}超出跌停价{stock_info.limit_down:.2f}"
         

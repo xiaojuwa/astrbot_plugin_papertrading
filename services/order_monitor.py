@@ -2,6 +2,7 @@
 import asyncio
 import time
 from typing import List
+from astrbot.api import logger
 from ..models.order import Order, OrderStatus
 from ..models.user import User
 from ..models.position import Position
@@ -27,7 +28,7 @@ class OrderMonitorService:
         
         self._running = True
         self._task = asyncio.create_task(self._monitor_loop())
-        print("挂单监控服务已启动")
+        logger.info("挂单监控服务已启动")
     
     async def stop_monitoring(self):
         """停止监控"""
@@ -38,7 +39,7 @@ class OrderMonitorService:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        print("挂单监控服务已停止")
+        logger.info("挂单监控服务已停止")
     
     async def _monitor_loop(self):
         """监控循环"""
@@ -51,13 +52,13 @@ class OrderMonitorService:
                 if self.stock_service.is_trading_time():
                     await self._check_pending_orders()
                 else:
-                    print("非交易时间，暂停挂单监控")
+                    logger.info("非交易时间，暂停挂单监控")
                 
                 # 等待下次检查
                 await asyncio.sleep(interval)
                 
             except Exception as e:
-                print(f"监控循环错误: {e}")
+                logger.error(f"监控循环错误: {e}")
                 await asyncio.sleep(interval)
     
     async def _check_pending_orders(self):
@@ -67,7 +68,7 @@ class OrderMonitorService:
         if not pending_orders:
             return
         
-        print(f"检查 {len(pending_orders)} 个待成交订单")
+        logger.info(f"检查 {len(pending_orders)} 个待成交订单")
         
         # 按股票代码分组，减少API调用
         stock_groups = {}
@@ -82,14 +83,14 @@ class OrderMonitorService:
             try:
                 await self._check_orders_for_stock(stock_code, orders)
             except Exception as e:
-                print(f"检查股票 {stock_code} 的订单时出错: {e}")
+                logger.info(f"检查股票 {stock_code} 的订单时出错: {e}")
     
     async def _check_orders_for_stock(self, stock_code: str, orders: List[dict]):
         """检查特定股票的订单"""
         # 获取最新股价
         stock_info = await self.stock_service.get_stock_info(stock_code)
         if not stock_info:
-            print(f"无法获取股票 {stock_code} 的信息")
+            logger.info(f"无法获取股票 {stock_code} 的信息")
             return
         
         # 检查每个订单
@@ -102,10 +103,10 @@ class OrderMonitorService:
                     await self._fill_order(order, stock_info)
             
             except Exception as e:
-                print(f"处理订单 {order_data.get('order_id', 'unknown')} 时出错: {e}")
+                logger.info(f"处理订单 {order_data.get('order_id', 'unknown')} 时出错: {e}")
     
     def _can_fill_order(self, order: Order, stock_info) -> bool:
-        """检查订单是否可以成交"""
+        """检查订单是否可以成交（简化逻辑）"""
         if not order.is_pending():
             return False
         
@@ -113,7 +114,13 @@ class OrderMonitorService:
         if stock_info.is_suspended:
             return False
         
-        # 检查价格条件
+        # 检查涨跌停限制
+        if order.is_buy_order() and stock_info.is_limit_up():
+            return False  # 涨停时不能买入
+        if order.is_sell_order() and stock_info.is_limit_down():
+            return False  # 跌停时不能卖出
+        
+        # 检查价格条件（简化：直接比较当前价格）
         current_price = stock_info.current_price
         
         if order.is_buy_order():
@@ -125,7 +132,7 @@ class OrderMonitorService:
     
     async def _fill_order(self, order: Order, stock_info):
         """成交订单"""
-        print(f"订单 {order.order_id[:8]}... 达到成交条件，开始成交")
+        logger.info(f"订单 {order.order_id[:8]}... 达到成交条件，开始成交")
         
         try:
             if order.is_buy_order():
@@ -134,20 +141,20 @@ class OrderMonitorService:
                 await self._fill_sell_order(order, stock_info)
         
         except Exception as e:
-            print(f"订单成交失败: {e}")
+            logger.info(f"订单成交失败: {e}")
     
     async def _fill_buy_order(self, order: Order, stock_info):
         """成交买单"""
         # 获取用户信息
         user_data = self.storage.get_user(order.user_id)
         if not user_data:
-            print(f"用户 {order.user_id} 不存在")
+            logger.info(f"用户 {order.user_id} 不存在")
             return
         
         user = User.from_dict(user_data)
         
-        # 确定成交价格（取委托价格和市价的较小值）
-        fill_price = min(order.order_price, stock_info.get_market_buy_price())
+        # 确定成交价格（使用当前实时价格）
+        fill_price = stock_info.current_price
         
         # 计算实际费用
         from .market_rules import MarketRulesEngine
@@ -193,14 +200,17 @@ class OrderMonitorService:
         self.storage.save_position(user.user_id, order.stock_code, position.to_dict())
         self.storage.save_order(order.order_id, order.to_dict())
         
-        print(f"买单成交: {order.stock_name} {order.order_volume}股，价格{fill_price:.2f}元")
+        logger.info(f"买单成交: {order.stock_name} {order.order_volume}股，价格{fill_price:.2f}元")
+        
+        # 向用户推送成交通知
+        await self._send_fill_notification(order, fill_price, "买入")
     
     async def _fill_sell_order(self, order: Order, stock_info):
         """成交卖单"""
         # 获取用户信息
         user_data = self.storage.get_user(order.user_id)
         if not user_data:
-            print(f"用户 {order.user_id} 不存在")
+            logger.info(f"用户 {order.user_id} 不存在")
             return
         
         user = User.from_dict(user_data)
@@ -208,7 +218,7 @@ class OrderMonitorService:
         # 获取持仓信息
         position_data = self.storage.get_position(order.user_id, order.stock_code)
         if not position_data:
-            print(f"用户 {order.user_id} 没有股票 {order.stock_code} 的持仓")
+            logger.info(f"用户 {order.user_id} 没有股票 {order.stock_code} 的持仓")
             order.cancel_order()
             self.storage.save_order(order.order_id, order.to_dict())
             return
@@ -217,13 +227,13 @@ class OrderMonitorService:
         
         # 检查可卖数量
         if not position.can_sell(order.order_volume):
-            print(f"用户 {order.user_id} 可卖数量不足")
+            logger.info(f"用户 {order.user_id} 可卖数量不足")
             order.cancel_order()
             self.storage.save_order(order.order_id, order.to_dict())
             return
         
-        # 确定成交价格（取委托价格和市价的较大值）
-        fill_price = max(order.order_price, stock_info.get_market_sell_price())
+        # 确定成交价格（使用当前实时价格）
+        fill_price = stock_info.current_price
         
         # 计算实际收入
         from .market_rules import MarketRulesEngine
@@ -253,7 +263,10 @@ class OrderMonitorService:
         
         self.storage.save_order(order.order_id, order.to_dict())
         
-        print(f"卖单成交: {order.stock_name} {order.order_volume}股，价格{fill_price:.2f}元，到账{total_income:.2f}元")
+        logger.info(f"卖单成交: {order.stock_name} {order.order_volume}股，价格{fill_price:.2f}元，到账{total_income:.2f}元")
+        
+        # 向用户推送成交通知
+        await self._send_fill_notification(order, fill_price, "卖出", total_income)
     
     async def force_check_order(self, order_id: str) -> bool:
         """强制检查单个订单"""
@@ -276,3 +289,45 @@ class OrderMonitorService:
             return True
         
         return False
+    
+    async def _send_fill_notification(self, order: Order, fill_price: float, action: str, total_amount: float = None):
+        """向用户发送成交通知"""
+        try:
+            from astrbot.core.star.star_tools import StarTools
+            from astrbot.core.message.message_event_result import MessageEventResult
+            
+            # 构造成交通知消息
+            if action == "买入":
+                message = (
+                    f"🎉 挂单成交通知\n\n"
+                    f"📈 买入成交\n"
+                    f"🏷️ {order.stock_name}({order.stock_code})\n"
+                    f"📊 数量: {order.order_volume}股\n"
+                    f"💰 成交价: {fill_price:.2f}元\n"
+                    f"💳 总金额: {order.order_volume * fill_price:.2f}元\n"
+                    f"⏰ 成交时间: {time.strftime('%H:%M:%S')}"
+                )
+            else:  # 卖出
+                message = (
+                    f"🎉 挂单成交通知\n\n"
+                    f"📉 卖出成交\n"
+                    f"🏷️ {order.stock_name}({order.stock_code})\n"
+                    f"📊 数量: {order.order_volume}股\n"
+                    f"💰 成交价: {fill_price:.2f}元\n"
+                    f"💳 到账金额: {total_amount:.2f}元\n"
+                    f"⏰ 成交时间: {time.strftime('%H:%M:%S')}"
+                )
+            
+            # 构造消息会话（需要从用户ID推导）
+            # 注意：这里需要知道用户所在的平台和群组，简化处理使用用户ID
+            session_str = f"unknown:private:{order.user_id}"
+            
+            # 发送消息
+            message_chain = MessageEventResult().message(message)
+            await StarTools.send_message(session_str, message_chain)
+            
+            logger.info(f"成交通知已发送给用户 {order.user_id}")
+            
+        except Exception as e:
+            logger.error(f"发送成交通知失败: {e}")
+            # 成交通知失败不应影响交易本身
