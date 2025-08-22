@@ -40,28 +40,33 @@ class MarketRulesEngine:
     
     def validate_buy_order(self, stock_info: StockInfo, order: Order, user_balance: float) -> Tuple[bool, str]:
         """验证买入订单"""
-        # 1. 检查股票是否停牌
+        # 1. 检查交易时间
+        time_valid, time_msg = self.validate_trading_time()
+        if not time_valid:
+            return False, time_msg
+        
+        # 2. 检查股票是否停牌
         if stock_info.is_suspended:
             return False, f"{stock_info.name}当前停牌，无法交易"
         
-        # 2. 检查涨跌停限制：涨停时不能买入
+        # 3. 检查涨跌停限制：涨停时不能买入
         if stock_info.is_limit_up():
             return False, f"{stock_info.name}已涨停，无法买入"
         
-        # 3. 检查价格是否超出涨跌停
+        # 4. 检查价格是否超出涨跌停
         if not stock_info.can_buy_at_price(order.order_price):
             return False, f"买入价格{order.order_price:.2f}超出涨停价{stock_info.limit_up:.2f}"
         
-        # 3. 检查资金是否充足
+        # 5. 检查资金是否充足
         total_amount = self.calculate_buy_amount(order.order_volume, order.order_price)
         if user_balance < total_amount:
             return False, f"资金不足，需要{total_amount:.2f}元，可用余额{user_balance:.2f}元"
         
-        # 4. 检查最小交易单位
+        # 6. 检查最小交易单位
         if order.order_volume % 100 != 0:
             return False, "交易数量必须是100股的整数倍"
         
-        # 5. 检查最小交易金额
+        # 7. 检查最小交易金额
         if total_amount < 100:
             return False, "单笔交易金额不能少于100元"
         
@@ -69,27 +74,32 @@ class MarketRulesEngine:
     
     def validate_sell_order(self, stock_info: StockInfo, order: Order, position: Optional[Position]) -> Tuple[bool, str]:
         """验证卖出订单"""
-        # 1. 检查是否有持仓
+        # 1. 检查交易时间
+        time_valid, time_msg = self.validate_trading_time()
+        if not time_valid:
+            return False, time_msg
+        
+        # 2. 检查是否有持仓
         if not position or position.is_empty():
             return False, f"您没有持有{stock_info.name}，无法卖出"
         
-        # 2. 检查股票是否停牌
+        # 3. 检查股票是否停牌
         if stock_info.is_suspended:
             return False, f"{stock_info.name}当前停牌，无法交易"
         
-        # 3. 检查涨跌停限制：跌停时不能卖出
+        # 4. 检查涨跌停限制：跌停时不能卖出
         if stock_info.is_limit_down():
             return False, f"{stock_info.name}已跌停，无法卖出"
         
-        # 4. 检查价格是否超出涨跌停
+        # 5. 检查价格是否超出涨跌停
         if not stock_info.can_sell_at_price(order.order_price):
             return False, f"卖出价格{order.order_price:.2f}超出跌停价{stock_info.limit_down:.2f}"
         
-        # 4. 检查可卖数量（T+1限制）
+        # 6. 检查可卖数量（T+1限制）
         if not position.can_sell(order.order_volume):
             return False, f"可卖数量不足，持有{position.total_volume}股，可卖{position.available_volume}股（T+1限制）"
         
-        # 5. 检查最小交易单位
+        # 7. 检查最小交易单位
         if order.order_volume % 100 != 0:
             return False, "交易数量必须是100股的整数倍"
         
