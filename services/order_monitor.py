@@ -1,10 +1,10 @@
 """挂单监控服务"""
 import asyncio
 import time
-from typing import List
+from typing import List, Dict, Any
 from astrbot.api import logger
-from astrbot.core.star.star_tools import StarTools
-from astrbot.core.message.message_event_result import MessageEventResult
+from astrbot.api.star import StarTools
+from astrbot.api.event import MessageEventResult
 from ..models.order import Order, OrderStatus
 from ..models.user import User
 from ..models.position import Position
@@ -128,12 +128,23 @@ class OrderMonitorService:
                 stock_groups[stock_code] = []
             stock_groups[stock_code].append(order_data)
         
-        # 逐个股票检查
+        # 修复N+1查询问题：批量获取所有股票的实时数据
+        stock_codes = list(stock_groups.keys())
+        stocks_data = await self.stock_service.batch_get_stocks(stock_codes)
+        
+        # 逐个股票检查，使用已批量获取的数据
         filled_orders = 0
         for stock_code, orders in stock_groups.items():
             try:
-                filled_count = await self._check_orders_for_stock(stock_code, orders)
-                filled_orders += filled_count
+                stock_info = stocks_data.get(stock_code)
+                if stock_info:
+                    filled_count = await self._check_orders_for_stock_with_data(stock_code, orders, stock_info)
+                    filled_orders += filled_count
+                else:
+                    # 批量获取失败时的兜底处理
+                    if self._stock_error_count.get(stock_code, 0) % 5 == 0:
+                        logger.warning(f"无法获取股票 {stock_code} 的信息")
+                    self._stock_error_count[stock_code] = self._stock_error_count.get(stock_code, 0) + 1
             except Exception as e:
                 logger.warning(f"检查股票 {stock_code} 的订单时出错: {e}")
         
@@ -143,18 +154,9 @@ class OrderMonitorService:
         
         return True
     
-    async def _check_orders_for_stock(self, stock_code: str, orders: List[dict]) -> int:
-        """检查特定股票的订单"""
+    async def _check_orders_for_stock_with_data(self, stock_code: str, orders: List[dict], stock_info: Any) -> int:
+        """使用已获取的股票数据检查特定股票的订单"""
         filled_count = 0
-        
-        # 获取最新股价
-        stock_info = await self.stock_service.get_stock_info(stock_code)
-        if not stock_info:
-            # 减少错误日志频率
-            if self._stock_error_count.get(stock_code, 0) % 5 == 0:
-                logger.warning(f"无法获取股票 {stock_code} 的信息")
-            self._stock_error_count[stock_code] = self._stock_error_count.get(stock_code, 0) + 1
-            return filled_count
         
         # 检查每个订单
         for order_data in orders:
@@ -170,6 +172,21 @@ class OrderMonitorService:
                 logger.warning(f"处理订单 {order_data.get('order_id', 'unknown')} 时出错: {e}")
         
         return filled_count
+    
+    async def _check_orders_for_stock(self, stock_code: str, orders: List[dict]) -> int:
+        """检查特定股票的订单（保留原方法以防其他地方调用）"""
+        filled_count = 0
+        
+        # 获取最新股价
+        stock_info = await self.stock_service.get_stock_info(stock_code)
+        if not stock_info:
+            # 减少错误日志频率
+            if self._stock_error_count.get(stock_code, 0) % 5 == 0:
+                logger.warning(f"无法获取股票 {stock_code} 的信息")
+            self._stock_error_count[stock_code] = self._stock_error_count.get(stock_code, 0) + 1
+            return filled_count
+        
+        return await self._check_orders_for_stock_with_data(stock_code, orders, stock_info)
     
     def _can_fill_order(self, order: Order, stock_info) -> bool:
         """检查订单是否可以成交（简化逻辑）"""
@@ -380,18 +397,8 @@ class OrderMonitorService:
                     f"⏰ 成交时间: {time.strftime('%H:%M:%S')}"
                 )
             
-            # 构造正确的会话ID（从用户ID中提取）
-            # 用户ID格式: platform:sender_id:session_id
-            # 会话ID格式: platform:session_id
-            user_id_parts = order.user_id.split(':')
-            if len(user_id_parts) >= 3:
-                platform = user_id_parts[0]
-                session_id = user_id_parts[2]
-                session_str = f"{platform}:{session_id}"
-            else:
-                # 兜底处理：使用原用户ID
-                session_str = order.user_id
-                logger.warning(f"无法解析用户ID格式，使用原ID: {order.user_id}")
+            # 构造会话ID（改进字符串解析的健壮性）
+            session_str = self._extract_session_from_user_id(order.user_id)
             
             # 发送消息
             message_chain = MessageEventResult().message(message)
@@ -405,3 +412,33 @@ class OrderMonitorService:
         except Exception as e:
             logger.error(f"发送成交通知失败: {e}")
             # 成交通知失败不应影响交易本身
+    
+    def _extract_session_from_user_id(self, user_id: str) -> str:
+        """
+        从用户ID中提取会话信息，增强健壮性
+        
+        Args:
+            user_id: 用户ID，格式通常为 platform:sender_id:session_id
+            
+        Returns:
+            str: 会话字符串，格式为 platform:session_id
+        """
+        try:
+            # 尝试标准格式解析: platform:sender_id:session_id
+            parts = user_id.split(':')
+            
+            if len(parts) >= 3:
+                platform = parts[0]
+                session_id = parts[2]  # 通常session_id是第3部分
+                return f"{platform}:{session_id}"
+            elif len(parts) == 2:
+                # 如果只有两部分，可能是 platform:session_id 格式
+                return user_id
+            else:
+                # 格式不符合预期，直接使用原ID
+                logger.debug(f"用户ID格式不标准，直接使用: {user_id}")
+                return user_id
+                
+        except Exception as e:
+            logger.warning(f"解析用户ID时出错: {e}，使用原ID: {user_id}")
+            return user_id
