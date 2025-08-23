@@ -22,7 +22,7 @@ class PaperTradingPlugin(Star):
         super().__init__(context)
         
         # 初始化服务（使用依赖注入）
-        self.storage = DataStorage("papertrading")
+        self.storage = DataStorage("papertrading", context.config_helper)
         self.stock_service = StockDataService(self.storage)
         self.trading_engine = TradingEngine(self.storage, self.stock_service)
         self.order_monitor = OrderMonitorService(self.storage)
@@ -134,8 +134,12 @@ class PaperTradingPlugin(Star):
     async def initialize(self):
         """插件初始化"""
         try:
-            # 启动挂单监控服务
-            await self.order_monitor.start_monitoring()
+            # 根据配置决定是否启动挂单监控服务
+            monitor_interval = self.context.config_helper.get("monitor_interval", 15)
+            if monitor_interval > 0:
+                await self.order_monitor.start_monitoring()
+            else:
+                logger.info("轮询间隔为0，挂单监控服务暂停")
             
             # 注册定时任务
             self.context.register_task(self._daily_maintenance(), "每日维护任务")
@@ -204,9 +208,8 @@ class PaperTradingPlugin(Star):
             yield MessageEventResult().message("您已经注册过了！使用 /股票账户 查看账户信息")
             return
         
-        # 创建新用户
-        config = self.storage.get_config()
-        initial_balance = config.get('initial_balance', 1000000)
+        # 创建新用户，从插件配置获取初始资金
+        initial_balance = self.context.config_helper.get('initial_balance', 1000000)
         
         user = User(
             user_id=user_id,

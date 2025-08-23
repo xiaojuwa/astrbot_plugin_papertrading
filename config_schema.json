@@ -1,0 +1,34 @@
+{
+  "monitor_interval": {
+    "type": "int",
+    "name": "轮询间隔",
+    "description": "挂单监控轮询间隔（秒），设为0时暂停监控，范围0-300秒",
+    "default": 15,
+    "min": 0,
+    "max": 300
+  },
+  "initial_balance": {
+    "type": "int",
+    "name": "初始资金",
+    "description": "用户注册时的初始资金（元），范围0-1000000元",
+    "default": 1000000,
+    "min": 0,
+    "max": 1000000
+  },
+  "commission_rate": {
+    "type": "float",
+    "name": "手续费率",
+    "description": "交易手续费率（小数形式），范围0-0.0005（即0%-0.05%）",
+    "default": 0.0003,
+    "min": 0.0,
+    "max": 0.0005
+  },
+  "min_commission": {
+    "type": "float",
+    "name": "最小手续费",
+    "description": "最小手续费金额（元），确保小额交易的最低收费",
+    "default": 5.0,
+    "min": 0.0,
+    "max": 50.0
+  }
+}

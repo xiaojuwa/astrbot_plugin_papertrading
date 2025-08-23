@@ -20,6 +20,7 @@ class OrderMonitorService:
         self.trading_engine = TradingEngine(storage)
         self._running = False
         self._task = None
+        self._paused = False  # 新增：暂停状态
     
     async def start_monitoring(self):
         """开始监控"""
@@ -42,14 +43,28 @@ class OrderMonitorService:
         logger.info("挂单监控服务已停止")
     
     async def _monitor_loop(self):
-        """监控循环 - 优化版本，减少不必要输出"""
-        config = self.storage.get_config()
-        interval = config.get('monitor_interval', 15)  # 默认15秒
+        """监控循环 - 支持动态配置和暂停/恢复"""
         last_trading_status = False
         no_orders_count = 0
         
         while self._running:
             try:
+                # 动态读取配置
+                interval = self.storage.get_plugin_config_value('monitor_interval', 15)
+                
+                # 如果间隔为0，进入暂停状态
+                if interval <= 0:
+                    if not self._paused:
+                        logger.info("轮询间隔设为0，暂停挂单监控")
+                        self._paused = True
+                    await asyncio.sleep(5)  # 暂停时每5秒检查一次配置
+                    continue
+                else:
+                    # 从暂停状态恢复
+                    if self._paused:
+                        logger.info(f"轮询间隔设为{interval}秒，恢复挂单监控")
+                        self._paused = False
+                
                 is_trading = self.stock_service.is_trading_time()
                 
                 if is_trading:
@@ -82,7 +97,8 @@ class OrderMonitorService:
                 
             except Exception as e:
                 logger.error(f"监控循环错误: {e}")
-                await asyncio.sleep(interval)
+                # 使用最小间隔避免过度重试
+                await asyncio.sleep(5)
     
     async def _check_pending_orders(self):
         """检查待成交订单"""

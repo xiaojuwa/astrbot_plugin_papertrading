@@ -143,9 +143,8 @@ class MarketRulesEngine:
     
     def calculate_commission(self, amount: float) -> float:
         """计算手续费"""
-        config = self.storage.get_config()
-        commission_rate = config.get('commission_rate', 0.0003)  # 默认0.03%
-        min_commission = config.get('min_commission', 5)         # 最低5元
+        commission_rate = self.storage.get_plugin_config_value('commission_rate', 0.0003)  # 默认0.03%
+        min_commission = self.storage.get_plugin_config_value('min_commission', 5.0)         # 最低5元
         
         commission = amount * commission_rate
         return max(commission, min_commission)

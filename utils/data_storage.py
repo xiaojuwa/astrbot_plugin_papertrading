@@ -10,9 +10,10 @@ from astrbot.api import logger
 class DataStorage:
     """数据存储管理器"""
     
-    def __init__(self, plugin_name: str = "papertrading"):
+    def __init__(self, plugin_name: str = "papertrading", config_helper=None):
         """初始化数据存储"""
         self.plugin_name = plugin_name
+        self.config_helper = config_helper
         self.data_dir = StarTools.get_data_dir(plugin_name)
         self._ensure_data_structure()
     
@@ -25,14 +26,11 @@ class DataStorage:
             'positions.json': {},
             'market_data_cache.json': {},
             'config.json': {
-                'initial_balance': 1000000,  # 初始资金100万
-                'commission_rate': 0.0003,   # 手续费率0.03%
-                'min_commission': 5,         # 最小手续费5元
+                # 保留市场时间配置（非插件配置项）
                 'market_hours': {
                     'morning': {'start': '09:30', 'end': '11:30'},
                     'afternoon': {'start': '13:00', 'end': '15:00'}
-                },
-                'monitor_interval': 15       # 监控间隔15秒
+                }
             }
         }
         
@@ -175,6 +173,15 @@ class DataStorage:
         self._save_json('config.json', config)
     
     def get_config_value(self, key: str, default=None):
-        """获取配置值"""
+        """获取配置值（向后兼容）"""
         config = self.get_config()
         return config.get(key, default)
+    
+    def get_plugin_config_value(self, key: str, default=None):
+        """获取插件配置值（优先从插件配置读取，回退到本地配置）"""
+        if self.config_helper:
+            return self.config_helper.get(key, default)
+        else:
+            # 回退到本地配置（向后兼容）
+            config = self.get_config()
+            return config.get(key, default)
