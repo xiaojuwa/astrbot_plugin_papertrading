@@ -39,7 +39,7 @@ class UserInteractionService:
         for i, candidate in enumerate(candidates[:5], 1):  # 最多显示5个
             selection_text += f"{i}. {candidate['name']} ({candidate['code']}) [{candidate['market']}]\n"
         selection_text += f"\n💡 请回复数字 1-{min(len(candidates), 5)} 选择股票\n"
-        selection_text += f"💡 或回复"取消"退出{action_description}"
+        selection_text += f'💡 或回复"取消"退出{action_description}'
         
         # 发送选择提示到事件
         try:
@@ -72,7 +72,7 @@ class UserInteractionService:
                         return
                 except ValueError:
                     # 非数字输入，继续等待
-                    await wait_event.reply("❌ 请输入数字进行选择，或输入"取消"退出")
+                    await wait_event.reply('❌ 请输入数字进行选择，或输入"取消"退出')
                     return
             
             # 启动等待
@@ -102,8 +102,8 @@ class UserInteractionService:
         confirmation_text = (
             f"{trade_info['confirmation_message']}\n\n"
             f"💡 请回复:\n"
-            f"  "确认" 或 "y" - 执行交易\n"
-            f"  "取消" 或 "n" - 取消交易"
+            f'  "确认" 或 "y" - 执行交易\n'
+            f'  "取消" 或 "n" - 取消交易'
         )
         
         # 发送确认提示
@@ -130,7 +130,7 @@ class UserInteractionService:
                     return
                 
                 # 无效输入，继续等待
-                await wait_event.reply("❌ 请回复"确认"或"取消"")
+                await wait_event.reply('❌ 请回复"确认"或"取消"')
                 return
             
             # 启动等待
@@ -160,7 +160,7 @@ class UserInteractionService:
         """
         # 发送输入提示
         try:
-            await event.reply(f"{prompt}\n\n💡 输入"取消"可退出")
+            await event.reply(f'{prompt}\n\n💡 输入"取消"可退出')
         except Exception as e:
             logger.error(f"发送输入提示失败: {e}")
             return None, "发送输入提示失败"
@@ -220,7 +220,7 @@ class UserInteractionService:
         choice_text = f"{prompt}\n\n"
         for i, choice in enumerate(choices, 1):
             choice_text += f"{i}. {choice}\n"
-        choice_text += f"\n💡 请回复数字 1-{len(choices)} 进行选择，或输入"取消"退出"
+        choice_text += f'\n💡 请回复数字 1-{len(choices)} 进行选择，或输入"取消"退出'
         
         # 发送选择提示
         try:
@@ -250,7 +250,7 @@ class UserInteractionService:
                         await wait_event.reply(f"❌ 无效选择，请输入 1-{len(choices)} 的数字")
                         return
                 except ValueError:
-                    await wait_event.reply("❌ 请输入数字进行选择，或输入"取消"退出")
+                    await wait_event.reply('❌ 请输入数字进行选择，或输入"取消"退出')
                     return
             
             # 启动等待

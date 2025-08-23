@@ -213,7 +213,7 @@ class TradeCoordinator:
         text = f"🔍 找到多个相关股票，请选择:\n\n"
         for i, candidate in enumerate(candidates[:5], 1):  # 最多显示5个
             text += f"{i}. {candidate['name']} ({candidate['code']}) [{candidate['market']}]\n"
-        text += f"\n💡 请回复数字 1-{len(candidates[:5])} 选择股票，或输入"取消"退出"
+        text += f'\n💡 请回复数字 1-{len(candidates[:5])} 选择股票，或输入"取消"退出'
         return text
     
     async def update_user_assets_if_needed(self, user_id: str):
