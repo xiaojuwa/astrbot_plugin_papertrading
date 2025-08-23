@@ -95,6 +95,25 @@ class DataStorage:
             return [order for order in orders.values() if order.get('user_id') == user_id]
         return list(orders.values())
     
+    def get_next_order_number(self) -> str:
+        """获取下一个订单号（五位数字序号）"""
+        counter_data = self._load_json('order_counter.json')
+        current_number = counter_data.get('current_number', 0)
+        
+        # 递增订单号
+        next_number = current_number + 1
+        
+        # 如果超过99999，重置为1
+        if next_number > 99999:
+            next_number = 1
+        
+        # 保存新的计数器
+        counter_data['current_number'] = next_number
+        self._save_json('order_counter.json', counter_data)
+        
+        # 返回五位数字字符串，不足补零
+        return f"{next_number:05d}"
+    
     def save_order(self, order_id: str, order_data: Dict[str, Any]):
         """保存订单数据"""
         orders = self._load_json('orders.json')

@@ -233,9 +233,9 @@ class PaperTradingPlugin(Star):
 
     # ==================== 交易相关 ====================
     
-    @command("股票买入")
-    async def buy_stock(self, event: AstrMessageEvent):
-        """买入股票（支持模糊搜索和确认）"""
+    @command("市价买入")
+    async def market_buy_stock(self, event: AstrMessageEvent):
+        """市价买入股票"""
         user_id = self._get_isolated_user_id(event)
         
         # 检查用户是否注册
@@ -246,15 +246,16 @@ class PaperTradingPlugin(Star):
         # 解析参数
         params = event.message_str.strip().split()[1:]
         if len(params) < 2:
-            yield MessageEventResult().message("❌ 参数不足\n\n格式: /股票买入 股票代码/名称 数量 [价格]\n例: /股票买入 平安银行 1000 12.50")
+            yield MessageEventResult().message("❌ 参数不足\n\n格式: /市价买入 股票代码/名称 数量\n例: /市价买入 平安银行 1000")
             return
         
         keyword = params[0]
         try:
             volume = int(params[1])
-            price = float(params[2]) if len(params) > 2 else None
+            # 市价单无需价格参数
+            price_text = None
         except (ValueError, IndexError):
-            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /股票买入 股票代码/名称 数量 [价格]\n例: /股票买入 平安银行 1000 12.50")
+            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /市价买入 股票代码/名称 数量\n例: /市价买入 平安银行 1000")
             return
         
         # 1. 股票搜索
@@ -272,7 +273,33 @@ class PaperTradingPlugin(Star):
                 yield MessageEventResult().message(f"❌ 无法获取 {stock_name} 的实时数据")
                 return
             
-            # 3. 交易确认（简化实现：默认确认）
+            # 3. 解析价格输入（支持涨停/跌停文本）
+            price = None
+            if price_text:
+                from .utils.price_calculator import get_price_calculator
+                price_calc = get_price_calculator(self.storage)
+                
+                # 计算当前时间的涨跌停价格
+                price_limits = await price_calc.calculate_price_limits(stock_code, stock_name)
+                if price_limits['limit_up'] > 0:
+                    # 尝试解析价格文本
+                    price = price_calc.parse_price_text(
+                        price_text, 
+                        price_limits['limit_up'], 
+                        price_limits['limit_down']
+                    )
+                    if price is None:
+                        yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}\n支持格式: 数字价格、涨停、跌停")
+                        return
+                else:
+                    # 如果无法计算涨跌停，尝试按数字解析
+                    try:
+                        price = float(price_text)
+                    except ValueError:
+                        yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}")
+                        return
+            
+            # 4. 交易确认（简化实现：默认确认）
             trade_type = "限价买入" if price else "市价买入"
             display_price = f"{price:.2f}元" if price else f"{stock_info.current_price:.2f}元(当前价)"
             
@@ -310,9 +337,104 @@ class PaperTradingPlugin(Star):
             logger.error(f"买入操作失败: {e}")
             yield MessageEventResult().message("❌ 交易失败，请稍后重试")
     
-    @command("股票卖出")
-    async def sell_stock(self, event: AstrMessageEvent):
-        """卖出股票（支持模糊搜索和确认）"""
+    @command("限价买入")
+    async def limit_buy_stock(self, event: AstrMessageEvent):
+        """限价买入股票"""
+        user_id = self._get_isolated_user_id(event)
+        
+        # 检查用户是否注册
+        if not self.storage.get_user(user_id):
+            yield MessageEventResult().message("❌ 您还未注册，请先使用 /股票注册 注册账户")
+            return
+        
+        # 解析参数
+        params = event.message_str.strip().split()[1:]
+        if len(params) < 3:
+            yield MessageEventResult().message("❌ 参数不足\n\n格式: /限价买入 股票代码/名称 数量 价格\n例: /限价买入 平安银行 1000 12.50\n    /限价买入 平安银行 1000 涨停")
+            return
+        
+        keyword = params[0]
+        try:
+            volume = int(params[1])
+            # 限价单必须提供价格参数，可能是数字或"涨停"/"跌停"文本
+            price_text = params[2]
+        except (ValueError, IndexError):
+            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /限价买入 股票代码/名称 数量 价格\n例: /限价买入 平安银行 1000 12.50\n    /限价买入 平安银行 1000 涨停")
+            return
+        
+        # 1. 股票搜索
+        selected_stock = await self._search_and_select_stock(event, keyword)
+        if not selected_stock:
+            return
+        
+        stock_code = selected_stock['code']
+        stock_name = selected_stock['name']
+        
+        # 2. 获取当前股价用于确认
+        try:
+            stock_info = await self.stock_service.get_stock_info(stock_code)
+            if not stock_info:
+                yield MessageEventResult().message(f"❌ 无法获取 {stock_name} 的实时数据")
+                return
+            
+            # 3. 解析价格输入（支持涨停/跌停文本）
+            from .utils.price_calculator import get_price_calculator
+            price_calc = get_price_calculator(self.storage)
+            
+            # 计算当前时间的涨跌停价格
+            price_limits = await price_calc.calculate_price_limits(stock_code, stock_name)
+            if price_limits['limit_up'] > 0:
+                # 尝试解析价格文本
+                price = price_calc.parse_price_text(
+                    price_text, 
+                    price_limits['limit_up'], 
+                    price_limits['limit_down']
+                )
+                if price is None:
+                    yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}\n支持格式: 数字价格、涨停、跌停")
+                    return
+            else:
+                # 如果无法计算涨跌停，尝试按数字解析
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}")
+                    return
+            
+            # 4. 交易确认（简化实现：默认确认）
+            trade_type = "限价买入"
+            display_price = f"{price:.2f}元"
+            
+            confirmation_text = (
+                f"📋 即将执行交易\n"
+                f"股票: {stock_name} ({stock_code})\n"
+                f"操作: {trade_type}\n" 
+                f"数量: {volume}股\n"
+                f"价格: {display_price}"
+            )
+            
+            yield MessageEventResult().message(confirmation_text)
+            
+            # 5. 执行交易
+            success, message, order = await self.trading_engine.place_buy_order(
+                user_id, 
+                stock_code, 
+                volume,
+                price
+            )
+            
+            if success:
+                yield MessageEventResult().message(f"✅ {message}")
+            else:
+                yield MessageEventResult().message(f"❌ {message}")
+                
+        except Exception as e:
+            logger.error(f"买入操作失败: {e}")
+            yield MessageEventResult().message("❌ 交易失败，请稍后重试")
+    
+    @command("市价卖出")
+    async def market_sell_stock(self, event: AstrMessageEvent):
+        """市价卖出股票"""
         user_id = self._get_isolated_user_id(event)
         
         # 检查用户是否注册
@@ -323,15 +445,16 @@ class PaperTradingPlugin(Star):
         # 解析参数
         params = event.message_str.strip().split()[1:]
         if len(params) < 2:
-            yield MessageEventResult().message("❌ 参数不足\n\n格式: /股票卖出 股票代码/名称 数量 [价格]\n例: /股票卖出 平安银行 500 13.00")
+            yield MessageEventResult().message("❌ 参数不足\n\n格式: /市价卖出 股票代码/名称 数量\n例: /市价卖出 平安银行 500")
             return
         
         keyword = params[0]
         try:
             volume = int(params[1])
-            price = float(params[2]) if len(params) > 2 else None
+            # 市价单无需价格参数
+            price_text = None
         except (ValueError, IndexError):
-            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /股票卖出 股票代码/名称 数量 [价格]\n例: /股票卖出 平安银行 500 13.00")
+            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /市价卖出 股票代码/名称 数量\n例: /市价卖出 平安银行 500")
             return
         
         # 1. 股票搜索
@@ -350,7 +473,33 @@ class PaperTradingPlugin(Star):
                 yield MessageEventResult().message(f"❌ 无法获取 {stock_name} 的实时数据")
                 return
             
-            # 3. 交易确认（简化实现：默认确认）
+            # 3. 解析价格输入（支持涨停/跌停文本）
+            price = None
+            if price_text:
+                from .utils.price_calculator import get_price_calculator
+                price_calc = get_price_calculator(self.storage)
+                
+                # 计算当前时间的涨跌停价格
+                price_limits = await price_calc.calculate_price_limits(stock_code, stock_name)
+                if price_limits['limit_up'] > 0:
+                    # 尝试解析价格文本
+                    price = price_calc.parse_price_text(
+                        price_text, 
+                        price_limits['limit_up'], 
+                        price_limits['limit_down']
+                    )
+                    if price is None:
+                        yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}\n支持格式: 数字价格、涨停、跌停")
+                        return
+                else:
+                    # 如果无法计算涨跌停，尝试按数字解析
+                    try:
+                        price = float(price_text)
+                    except ValueError:
+                        yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}")
+                        return
+            
+            # 4. 交易确认（简化实现：默认确认）
             trade_type = "限价卖出" if price else "市价卖出"
             display_price = f"{price:.2f}元" if price else f"{stock_info.current_price:.2f}元(当前价)"
             
@@ -377,6 +526,102 @@ class PaperTradingPlugin(Star):
                 parsed['stock_code'],
                 parsed['volume'],
                 parsed['price']
+            )
+            
+            if success:
+                yield MessageEventResult().message(f"✅ {message}")
+            else:
+                yield MessageEventResult().message(f"❌ {message}")
+                
+        except Exception as e:
+            logger.error(f"卖出操作失败: {e}")
+            yield MessageEventResult().message("❌ 交易失败，请稍后重试")
+    
+    @command("限价卖出")
+    async def limit_sell_stock(self, event: AstrMessageEvent):
+        """限价卖出股票"""
+        user_id = self._get_isolated_user_id(event)
+        
+        # 检查用户是否注册
+        if not self.storage.get_user(user_id):
+            yield MessageEventResult().message("❌ 您还未注册，请先使用 /股票注册 注册账户")
+            return
+        
+        # 解析参数
+        params = event.message_str.strip().split()[1:]
+        if len(params) < 3:
+            yield MessageEventResult().message("❌ 参数不足\n\n格式: /限价卖出 股票代码/名称 数量 价格\n例: /限价卖出 平安银行 500 13.00\n    /限价卖出 平安银行 500 跌停")
+            return
+        
+        keyword = params[0]
+        try:
+            volume = int(params[1])
+            # 限价单必须提供价格参数，可能是数字或"涨停"/"跌停"文本
+            price_text = params[2]
+        except (ValueError, IndexError):
+            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /限价卖出 股票代码/名称 数量 价格\n例: /限价卖出 平安银行 500 13.00\n    /限价卖出 平安银行 500 跌停")
+            return
+        
+        # 1. 股票搜索
+        selected_stock = await self._search_and_select_stock(event, keyword)
+        if not selected_stock:
+            yield MessageEventResult().message(f"❌ 未找到相关股票: {keyword}")
+            return
+        
+        stock_code = selected_stock['code']
+        stock_name = selected_stock['name']
+        
+        # 2. 获取当前股价用于确认
+        try:
+            stock_info = await self.stock_service.get_stock_info(stock_code)
+            if not stock_info:
+                yield MessageEventResult().message(f"❌ 无法获取 {stock_name} 的实时数据")
+                return
+            
+            # 3. 解析价格输入（支持涨停/跌停文本）
+            from .utils.price_calculator import get_price_calculator
+            price_calc = get_price_calculator(self.storage)
+            
+            # 计算当前时间的涨跌停价格
+            price_limits = await price_calc.calculate_price_limits(stock_code, stock_name)
+            if price_limits['limit_up'] > 0:
+                # 尝试解析价格文本
+                price = price_calc.parse_price_text(
+                    price_text, 
+                    price_limits['limit_up'], 
+                    price_limits['limit_down']
+                )
+                if price is None:
+                    yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}\n支持格式: 数字价格、涨停、跌停")
+                    return
+            else:
+                # 如果无法计算涨跌停，尝试按数字解析
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    yield MessageEventResult().message(f"❌ 无法解析价格参数: {price_text}")
+                    return
+            
+            # 4. 交易确认（简化实现：默认确认）
+            trade_type = "限价卖出"
+            display_price = f"{price:.2f}元"
+            
+            confirmation_text = (
+                f"📋 即将执行交易\n"
+                f"股票: {stock_name} ({stock_code})\n"
+                f"操作: {trade_type}\n"
+                f"数量: {volume}股\n"
+                f"价格: {display_price}"
+            )
+            
+            yield MessageEventResult().message(confirmation_text)
+            
+            # 5. 执行交易
+            success, message, order = await self.trading_engine.place_sell_order(
+                user_id,
+                stock_code,
+                volume,
+                price
             )
             
             if success:

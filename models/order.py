@@ -47,11 +47,17 @@ class Order:
     def __post_init__(self):
         """初始化后处理"""
         if not self.order_id:
-            self.order_id = str(uuid.uuid4())
+            # 使用简单的五位数字序号，需要在创建时传入storage实例
+            self.order_id = str(uuid.uuid4())  # 临时方案，在实际使用时会被覆盖
         if self.create_time == 0:
             self.create_time = int(time.time())
         if self.update_time == 0:
             self.update_time = int(time.time())
+    
+    def set_order_id_from_storage(self, storage):
+        """从存储中获取订单号"""
+        if hasattr(storage, 'get_next_order_number'):
+            self.order_id = storage.get_next_order_number()
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

@@ -5,6 +5,7 @@ from ..models.stock import StockInfo
 from ..models.order import Order, OrderType
 from ..models.position import Position
 from ..utils.data_storage import DataStorage
+from ..utils.market_time import market_time_manager
 
 
 class MarketRulesEngine:
@@ -14,29 +15,8 @@ class MarketRulesEngine:
         self.storage = storage
     
     def validate_trading_time(self) -> Tuple[bool, str]:
-        """验证交易时间"""
-        now = datetime.now()
-        
-        # 检查是否是工作日
-        if now.weekday() >= 5:  # 周六日
-            return False, "非交易日，无法进行交易"
-        
-        # 检查是否在交易时间
-        current_time = now.time()
-        
-        # 交易时间：9:30-11:30, 13:00-15:00
-        morning_start = datetime.strptime("09:30", "%H:%M").time()
-        morning_end = datetime.strptime("11:30", "%H:%M").time()
-        afternoon_start = datetime.strptime("13:00", "%H:%M").time()
-        afternoon_end = datetime.strptime("15:00", "%H:%M").time()
-        
-        is_morning = morning_start <= current_time <= morning_end
-        is_afternoon = afternoon_start <= current_time <= afternoon_end
-        
-        if not (is_morning or is_afternoon):
-            return False, "非交易时间，交易时间为9:30-11:30, 13:00-15:00"
-        
-        return True, ""
+        """验证交易时间（使用统一的市场时间管理器）"""
+        return market_time_manager.can_place_order()
     
     def validate_buy_order(self, stock_info: StockInfo, order: Order, user_balance: float) -> Tuple[bool, str]:
         """验证买入订单"""
@@ -187,22 +167,8 @@ class MarketRulesEngine:
                 self.storage.save_position(user_id, position.stock_code, position.to_dict())
     
     def is_call_auction_period(self) -> bool:
-        """检查是否在集合竞价期间"""
-        now = datetime.now()
-        current_time = now.time()
-        
-        # 开盘集合竞价：9:15-9:25
-        morning_start = datetime.strptime("09:15", "%H:%M").time()
-        morning_end = datetime.strptime("09:25", "%H:%M").time()
-        
-        # 收盘集合竞价：14:57-15:00
-        afternoon_start = datetime.strptime("14:57", "%H:%M").time()
-        afternoon_end = datetime.strptime("15:00", "%H:%M").time()
-        
-        is_morning_auction = morning_start <= current_time <= morning_end
-        is_afternoon_auction = afternoon_start <= current_time <= afternoon_end
-        
-        return is_morning_auction or is_afternoon_auction
+        """检查是否在集合竞价期间（使用统一的市场时间管理器）"""
+        return market_time_manager.is_call_auction_time()
     
     def validate_order_in_auction(self, order: Order) -> Tuple[bool, str]:
         """验证集合竞价期间的订单"""

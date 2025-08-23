@@ -6,6 +6,7 @@ from ..models.stock import StockInfo
 from ..models.order import Order, OrderType, OrderStatus, PriceType
 from ..models.position import Position
 from ..utils.data_storage import DataStorage
+from ..utils.market_time import market_time_manager
 from .market_rules import MarketRulesEngine
 
 
@@ -48,7 +49,7 @@ class TradingEngine:
         
         # 4. 创建订单
         order = Order(
-            order_id="",  # 将在__post_init__中生成
+            order_id="",  # 将使用storage生成
             user_id=user_id,
             stock_code=stock_code,
             stock_name=stock_info.name,
@@ -62,25 +63,32 @@ class TradingEngine:
             create_time=0,  # 将在__post_init__中生成
             update_time=0   # 将在__post_init__中生成
         )
+        # 生成简洁的五位数字订单号
+        order.set_order_id_from_storage(self.storage)
         
         # 5. 市场规则验证（包含涨停跌停检查）
         is_valid, error_msg = self.market_rules.validate_buy_order(stock_info, order, user.balance)
         if not is_valid:
             return False, error_msg, None
         
-        # 6. 处理订单（简化逻辑）
+        # 6. 检查交易时间
+        is_trading_time = market_time_manager.is_trading_time()
+        
+        # 7. 处理订单
         if order.is_market_order():
-            # 市价单立即按当前价格成交
+            # 市价单必须在交易时间内立即成交
+            if not is_trading_time:
+                return False, "市价单只能在交易时间内下单", None
             order.order_price = stock_info.current_price
             return await self._execute_buy_order_immediately(user, order, stock_info)
         else:
-            # 限价单检查是否能立即成交
-            if order.order_price >= stock_info.current_price:
-                # 可以立即成交，使用当前价格
+            # 限价单处理
+            if is_trading_time and order.order_price >= stock_info.current_price:
+                # 交易时间内且可以立即成交，使用当前价格
                 order.order_price = stock_info.current_price
                 return await self._execute_buy_order_immediately(user, order, stock_info)
             else:
-                # 挂单等待
+                # 非交易时间或价格不满足立即成交条件，挂单等待
                 return await self._place_pending_buy_order(user, order)
     
     async def place_sell_order(self, user_id: str, stock_code: str, volume: int,
@@ -132,25 +140,32 @@ class TradingEngine:
             create_time=0,
             update_time=0
         )
+        # 生成简洁的五位数字订单号
+        order.set_order_id_from_storage(self.storage)
         
         # 6. 市场规则验证（包含涨停跌停检查）
         is_valid, error_msg = self.market_rules.validate_sell_order(stock_info, order, position)
         if not is_valid:
             return False, error_msg, None
         
-        # 7. 处理订单（简化逻辑）
+        # 7. 检查交易时间
+        is_trading_time = market_time_manager.is_trading_time()
+        
+        # 8. 处理订单
         if order.is_market_order():
-            # 市价单立即按当前价格成交
+            # 市价单必须在交易时间内立即成交
+            if not is_trading_time:
+                return False, "市价单只能在交易时间内下单", None
             order.order_price = stock_info.current_price
             return await self._execute_sell_order_immediately(user, order, position, stock_info)
         else:
-            # 限价单检查是否能立即成交
-            if order.order_price <= stock_info.current_price:
-                # 可以立即成交，使用当前价格
+            # 限价单处理
+            if is_trading_time and order.order_price <= stock_info.current_price:
+                # 交易时间内且可以立即成交，使用当前价格
                 order.order_price = stock_info.current_price
                 return await self._execute_sell_order_immediately(user, order, position, stock_info)
             else:
-                # 挂单等待
+                # 非交易时间或价格不满足立即成交条件，挂单等待
                 return await self._place_pending_sell_order(user, order, position)
     
     async def _execute_buy_order_immediately(self, user: User, order: Order, 
@@ -247,7 +262,14 @@ class TradingEngine:
         self.storage.save_order(order.order_id, order.to_dict())
         self.storage.save_user(user.user_id, user.to_dict())
         
-        return True, f"买入挂单成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元", order
+        # 根据交易时间给出不同的提示信息
+        is_trading_time = market_time_manager.is_trading_time()
+        if is_trading_time:
+            message = f"买入挂单成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，订单号{order.order_id}"
+        else:
+            message = f"隔夜买单挂单成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，将在交易时间成交，订单号{order.order_id}"
+        
+        return True, message, order
     
     async def _place_pending_sell_order(self, user: User, order: Order, position: Position) -> Tuple[bool, str, Order]:
         """挂卖单"""
@@ -257,7 +279,14 @@ class TradingEngine:
         # 2. 保存挂单
         self.storage.save_order(order.order_id, order.to_dict())
         
-        return True, f"卖出挂单成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元", order
+        # 根据交易时间给出不同的提示信息
+        is_trading_time = market_time_manager.is_trading_time()
+        if is_trading_time:
+            message = f"卖出挂单成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，订单号{order.order_id}"
+        else:
+            message = f"隔夜卖单挂单成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，将在交易时间成交，订单号{order.order_id}"
+        
+        return True, message, order
     
     async def cancel_order(self, user_id: str, order_id: str) -> Tuple[bool, str]:
         """撤销订单"""

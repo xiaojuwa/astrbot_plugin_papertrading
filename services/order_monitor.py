@@ -193,7 +193,7 @@ class OrderMonitorService:
     
     async def _fill_order(self, order: Order, stock_info):
         """成交订单"""
-        logger.info(f"订单 {order.order_id[:8]}... 达到成交条件，开始成交")
+        logger.info(f"订单 {order.order_id} 达到成交条件，开始成交")
         
         try:
             if order.is_buy_order():
