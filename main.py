@@ -1,5 +1,5 @@
-"""A股模拟交易插件 - 重构版本
-符合AstrBot v4.0+规范，使用现代架构模式
+"""A股模拟交易插件
+完整的模拟股票交易系统，支持买卖、挂单、持仓管理等功能
 """
 import asyncio
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter

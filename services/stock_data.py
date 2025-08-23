@@ -1,4 +1,4 @@
-"""股票数据服务 - 使用东方财富API重构版本"""
+"""股票数据服务 - 基于东方财富API实现"""
 import time
 from typing import Optional, Dict, Any
 from datetime import datetime, time as dt_time

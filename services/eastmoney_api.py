@@ -23,7 +23,7 @@ class EastMoneyAPIService:
             'Connection': 'keep-alive'
         }
         
-        # 常用股票代码映射（从temp_sayustock借鉴）
+        # 常用股票代码映射
         self.code_id_dict = {
             '上证综指': '1.000001',
             '上证指数': '1.000001', 
@@ -60,7 +60,6 @@ class EastMoneyAPIService:
     async def get_code_id(self, code: str) -> Optional[Tuple[str, str]]:
         """
         获取东方财富股票专用的行情ID
-        借鉴自temp_sayustock项目
         
         Args:
             code: 股票代码或简称
@@ -200,7 +199,6 @@ class EastMoneyAPIService:
     def _get_full_security_code(self, code: str) -> str:
         """
         获取完整的证券代码
-        借鉴自temp_sayustock项目
         """
         if '.' not in code:
             # 根据代码前缀判断市场
