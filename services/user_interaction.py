@@ -4,6 +4,8 @@ from typing import Optional, Dict, Any, List, Callable, AsyncGenerator
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.core.utils.session_waiter import SessionWaiter, session_waiter, SessionController
+from astrbot.api.message_components import Plain
+from astrbot.core.message.message_event_result import MessageChain
 
 
 class UserInteractionService:
@@ -43,7 +45,7 @@ class UserInteractionService:
         
         # 发送选择提示到事件
         try:
-            await event.reply(selection_text)
+            await event.send(MessageChain([Plain(selection_text)]))
         except Exception as e:
             logger.error(f"发送选择提示失败: {e}")
             return None, "发送选择提示失败"
@@ -68,11 +70,11 @@ class UserInteractionService:
                         return
                     else:
                         # 无效选择，继续等待
-                        await wait_event.reply(f"❌ 无效选择，请输入 1-{min(len(candidates), 5)} 的数字")
+                        await wait_event.send(MessageChain([Plain(f"❌ 无效选择，请输入 1-{min(len(candidates), 5)} 的数字")]))
                         return
                 except ValueError:
                     # 非数字输入，继续等待
-                    await wait_event.reply('❌ 请输入数字进行选择，或输入"取消"退出')
+                    await wait_event.send(MessageChain([Plain('❌ 请输入数字进行选择，或输入"取消"退出')]))
                     return
             
             # 启动等待
@@ -108,7 +110,7 @@ class UserInteractionService:
         
         # 发送确认提示
         try:
-            await event.reply(confirmation_text)
+            await event.send(MessageChain([Plain(confirmation_text)]))
         except Exception as e:
             logger.error(f"发送确认提示失败: {e}")
             return None, "发送确认提示失败"
@@ -130,7 +132,7 @@ class UserInteractionService:
                     return
                 
                 # 无效输入，继续等待
-                await wait_event.reply('❌ 请回复"确认"或"取消"')
+                await wait_event.send(MessageChain([Plain('❌ 请回复"确认"或"取消"')]))
                 return
             
             # 启动等待
@@ -160,7 +162,7 @@ class UserInteractionService:
         """
         # 发送输入提示
         try:
-            await event.reply(f'{prompt}\n\n💡 输入"取消"可退出')
+            await event.send(MessageChain([Plain(f'{prompt}\n\n💡 输入"取消"可退出')]))
         except Exception as e:
             logger.error(f"发送输入提示失败: {e}")
             return None, "发送输入提示失败"
@@ -178,7 +180,7 @@ class UserInteractionService:
                 
                 # 验证输入
                 if validator and not validator(user_input):
-                    await wait_event.reply("❌ 输入格式不正确，请重新输入")
+                    await wait_event.send(MessageChain([Plain("❌ 输入格式不正确，请重新输入")]))
                     return
                 
                 controller.stop(result=user_input)
@@ -224,7 +226,7 @@ class UserInteractionService:
         
         # 发送选择提示
         try:
-            await event.reply(choice_text)
+            await event.send(MessageChain([Plain(choice_text)]))
         except Exception as e:
             logger.error(f"发送选择提示失败: {e}")
             return None, "发送选择提示失败"
@@ -247,10 +249,10 @@ class UserInteractionService:
                         controller.stop(result=choice_num - 1)  # 返回0-based索引
                         return
                     else:
-                        await wait_event.reply(f"❌ 无效选择，请输入 1-{len(choices)} 的数字")
+                        await wait_event.send(MessageChain([Plain(f"❌ 无效选择，请输入 1-{len(choices)} 的数字")]))
                         return
                 except ValueError:
-                    await wait_event.reply('❌ 请输入数字进行选择，或输入"取消"退出')
+                    await wait_event.send(MessageChain([Plain('❌ 请输入数字进行选择，或输入"取消"退出')]))
                     return
             
             # 启动等待
