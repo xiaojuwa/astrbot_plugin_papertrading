@@ -207,7 +207,7 @@ class StockDataService:
         """
         判断是否为中午休市时间 (11:30-13:00)
         """
-        from .market_time import market_time_manager
+        from ..utils.market_time import market_time_manager
         if not market_time_manager.is_trading_day(current_time.date()):
             return False
             
@@ -226,7 +226,7 @@ class StockDataService:
         - 13:00-15:00 (下午交易)
         """
         # 首先检查是否为交易日
-        from .market_time import market_time_manager
+        from ..utils.market_time import market_time_manager
         if not market_time_manager.is_trading_day(current_time.date()):
             return False
         
