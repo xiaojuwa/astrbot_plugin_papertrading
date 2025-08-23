@@ -115,7 +115,7 @@ class EastMoneyAPIService:
                 return f"0.{code}"
             elif code.startswith(('60', '68', '51')):  # 沪市
                 return f"1.{code}"
-            elif code.startswith('83') or code.startswith('43') or code.startswith('87'):  # 北交所
+            elif code.startswith(('43', '83', '87')):  # 北交所
                 return f"0.{code}"
         return code
     
@@ -175,20 +175,21 @@ class EastMoneyAPIService:
                     raw_data = data['data']
                     
                     # 解析数据 - 只返回模拟交易必需的字段
+                    # 注意：东方财富API返回的价格数据需要除以100，涨跌幅数据需要除以100
                     result = {
                         'code': stock_code,
                         'name': raw_data.get('f58', stock_name),
-                        'current_price': float(raw_data.get('f43', 0) or 0),
-                        'open_price': float(raw_data.get('f46', 0) or 0),
-                        'close_price': float(raw_data.get('f60', 0) or 0),  # 昨收价
-                        'high_price': float(raw_data.get('f44', 0) or 0),
-                        'low_price': float(raw_data.get('f45', 0) or 0),
-                        'volume': int(raw_data.get('f47', 0) or 0),
-                        'turnover': float(raw_data.get('f48', 0) or 0),
-                        'change_amount': float(raw_data.get('f169', 0) or 0),
-                        'change_percent': float(raw_data.get('f170', 0) or 0),
-                        'limit_up': float(raw_data.get('f51', 0) or 0),
-                        'limit_down': float(raw_data.get('f52', 0) or 0),
+                        'current_price': float(raw_data.get('f43', 0) or 0) / 100,  # 价格除以100
+                        'open_price': float(raw_data.get('f46', 0) or 0) / 100,      # 开盘价除以100
+                        'close_price': float(raw_data.get('f60', 0) or 0) / 100,     # 昨收价除以100
+                        'high_price': float(raw_data.get('f44', 0) or 0) / 100,      # 最高价除以100
+                        'low_price': float(raw_data.get('f45', 0) or 0) / 100,       # 最低价除以100
+                        'volume': int(raw_data.get('f47', 0) or 0),                  # 成交量（手）
+                        'turnover': float(raw_data.get('f48', 0) or 0),              # 成交额（元）
+                        'change_amount': float(raw_data.get('f169', 0) or 0) / 100,  # 涨跌额除以100
+                        'change_percent': float(raw_data.get('f170', 0) or 0) / 100, # 涨跌幅除以100
+                        'limit_up': float(raw_data.get('f51', 0) or 0) / 100,        # 涨停价除以100
+                        'limit_down': float(raw_data.get('f52', 0) or 0) / 100,      # 跌停价除以100
                         'timestamp': raw_data.get('f86', ''),
                     }
                     

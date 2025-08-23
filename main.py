@@ -28,6 +28,25 @@ class PaperTradingPlugin(Star):
         self.order_monitor = OrderMonitorService(self.storage)
         
         logger.info("A股模拟交易插件初始化完成")
+    
+    def _get_isolated_user_id(self, event: AstrMessageEvent) -> str:
+        """
+        获取隔离的用户ID，确保不同群聊中的数据隔离
+        格式: platform:sender_id:session_id
+        
+        Args:
+            event: 消息事件对象
+            
+        Returns:
+            隔离的用户ID字符串
+        """
+        platform_name = event.get_platform_name()
+        sender_id = event.get_sender_id()
+        session_id = event.get_session_id()
+        
+        # 使用平台:发送者:会话的组合来确保数据隔离
+        # 这样同一用户在不同群聊中会有不同的账户
+        return f"{platform_name}:{sender_id}:{session_id}"
 
     async def initialize(self):
         """插件初始化"""
@@ -93,7 +112,7 @@ class PaperTradingPlugin(Star):
     @command("股票注册")
     async def register_user(self, event: AstrMessageEvent):
         """用户注册"""
-        user_id = event.get_sender_id()
+        user_id = self._get_isolated_user_id(event)
         user_name = event.get_sender_name() or f"用户{user_id}"
         
         # 检查是否已注册
@@ -127,17 +146,17 @@ class PaperTradingPlugin(Star):
 
     # ==================== 交易相关 ====================
     
-    @command("买入")
+    @command("股票买入")
     async def buy_stock(self, event: AstrMessageEvent):
         """买入股票"""
-        user_id = event.get_sender_id()
+        user_id = self._get_isolated_user_id(event)
         
         # 解析参数
         params = event.message_str.strip().split()[1:]  # 去掉命令本身
         parsed = Validators.parse_order_params(params)
         
         if parsed['error']:
-            yield MessageEventResult().message(f"❌ {parsed['error']}\n\n格式: /买入 股票代码 数量 [价格]\n例: /买入 000001 1000 12.50")
+            yield MessageEventResult().message(f"❌ {parsed['error']}\n\n格式: /股票买入 股票代码 数量 [价格]\n例: /股票买入 000001 1000 12.50")
             return
         
         # 执行买入
@@ -158,17 +177,17 @@ class PaperTradingPlugin(Star):
             logger.error(f"买入操作失败: {e}")
             yield MessageEventResult().message("❌ 交易失败，请稍后重试")
     
-    @command("卖出")
+    @command("股票卖出")
     async def sell_stock(self, event: AstrMessageEvent):
         """卖出股票"""
-        user_id = event.get_sender_id()
+        user_id = self._get_isolated_user_id(event)
         
         # 解析参数
         params = event.message_str.strip().split()[1:]
         parsed = Validators.parse_order_params(params)
         
         if parsed['error']:
-            yield MessageEventResult().message(f"❌ {parsed['error']}\n\n格式: /卖出 股票代码 数量 [价格]\n例: /卖出 000001 500 13.00")
+            yield MessageEventResult().message(f"❌ {parsed['error']}\n\n格式: /股票卖出 股票代码 数量 [价格]\n例: /股票卖出 000001 500 13.00")
             return
         
         # 执行卖出
@@ -189,14 +208,14 @@ class PaperTradingPlugin(Star):
             logger.error(f"卖出操作失败: {e}")
             yield MessageEventResult().message("❌ 交易失败，请稍后重试")
     
-    @command("撤单")
+    @command("股票撤单")
     async def cancel_order(self, event: AstrMessageEvent):
         """撤销订单"""
-        user_id = event.get_sender_id()
+        user_id = self._get_isolated_user_id(event)
         params = event.message_str.strip().split()[1:]
         
         if not params:
-            yield MessageEventResult().message("❌ 请提供订单号\n格式: /撤单 订单号")
+            yield MessageEventResult().message("❌ 请提供订单号\n格式: /股票撤单 订单号")
             return
         
         order_id = params[0]
@@ -215,10 +234,10 @@ class PaperTradingPlugin(Star):
 
     # ==================== 查询相关 ====================
     
-    @command("我的账户")
+    @command("股票账户")
     async def show_account_info(self, event: AstrMessageEvent):
         """显示账户信息（合并持仓、余额、订单查询）"""
-        user_id = event.get_sender_id()
+        user_id = self._get_isolated_user_id(event)
         
         # 检查用户是否注册
         user_data = self.storage.get_user(user_id)
@@ -288,21 +307,34 @@ class PaperTradingPlugin(Star):
             logger.error(f"查询股价失败: {e}")
             yield MessageEventResult().message("❌ 查询失败，请稍后重试")
     
-    @command("排行")
+    @command("股票排行")
     async def show_ranking(self, event: AstrMessageEvent):
         """显示群内排行榜"""
         try:
+            # 获取当前会话的标识，用于过滤同群用户
+            platform_name = event.get_platform_name()
+            session_id = event.get_session_id()
+            session_prefix = f"{platform_name}:"
+            session_suffix = f":{session_id}"
+            
             all_users_data = self.storage.get_all_users()
             users_list = []
             
             for user_id, user_data in all_users_data.items():
-                # 更新用户总资产
-                await self.trading_engine.update_user_assets(user_id)
-                updated_user_data = self.storage.get_user(user_id)
-                if updated_user_data:
-                    users_list.append(updated_user_data)
+                # 只包含相同会话（群聊）的用户
+                if user_id.startswith(session_prefix) and user_id.endswith(session_suffix):
+                    # 更新用户总资产
+                    await self.trading_engine.update_user_assets(user_id)
+                    updated_user_data = self.storage.get_user(user_id)
+                    if updated_user_data:
+                        users_list.append(updated_user_data)
             
-            current_user_id = event.get_sender_id()
+            current_user_id = self._get_isolated_user_id(event)
+            
+            if not users_list:
+                yield MessageEventResult().message("📊 当前群聊暂无用户排行数据\n请先使用 /股票注册 注册账户")
+                return
+            
             ranking_text = Formatters.format_ranking(users_list, current_user_id)
             yield MessageEventResult().message(ranking_text)
             
@@ -312,7 +344,7 @@ class PaperTradingPlugin(Star):
 
     # ==================== 帮助信息 ====================
     
-    @command("帮助")
+    @command("股票帮助")
     async def show_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         help_text = Formatters.format_help_message()
