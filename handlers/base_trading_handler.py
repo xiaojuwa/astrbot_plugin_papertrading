@@ -21,40 +21,45 @@ class BaseTradingHandler(ABC):
         self.user_interaction = user_interaction
     
     async def validate_user_and_parse_params(self, event: AstrMessageEvent, 
-                                           require_price: bool = False) -> tuple[bool, Optional[User], Optional[Dict[str, Any]]]:
+                                           require_price: bool = False) -> AsyncGenerator[Any, None]:
         """
         验证用户并解析参数的统一入口
         
-        Returns:
-            (处理成功, 用户对象, 解析的参数)
+        Yields:
+            MessageEventResult: 错误消息（如有）
+            tuple: (处理成功, 用户对象, 解析的参数)
         """
         # 1. 验证用户注册
         is_registered, error_msg, user = await self.trade_coordinator.validate_user_registration(event)
         if not is_registered:
             yield MessageEventResult().message(error_msg)
-            return False, None, None
+            yield (False, None, None)
+            return
         
         # 2. 解析参数
         params = event.message_str.strip().split()[1:]  # 移除命令本身
         success, error_msg, parsed_params = self.trade_coordinator.parse_trading_parameters(params, require_price)
         if not success:
             yield MessageEventResult().message(error_msg)
-            return False, None, None
+            yield (False, None, None)
+            return
         
-        return True, user, parsed_params
+        yield (True, user, parsed_params)
     
-    async def search_and_select_stock(self, event: AstrMessageEvent, keyword: str) -> Optional[Dict[str, str]]:
+    async def search_and_select_stock(self, event: AstrMessageEvent, keyword: str) -> AsyncGenerator[Any, None]:
         """
         搜索并选择股票的统一流程
         
-        Returns:
-            选择的股票信息 {'code', 'name', 'market'}
+        Yields:
+            MessageEventResult: 消息结果
+            Dict[str, str]: 选择的股票信息 {'code', 'name', 'market'}
         """
         # 搜索股票
         success, error_msg, result = await self.trade_coordinator.search_and_validate_stock(keyword)
         if not success:
             yield MessageEventResult().message(error_msg)
-            return None
+            yield None
+            return
         
         # 检查是否需要用户选择
         if result.get("multiple"):
@@ -64,44 +69,59 @@ class BaseTradingHandler(ABC):
             )
             if error_msg:
                 yield MessageEventResult().message(error_msg)
-                return None
+                yield None
+                return
             if selected_stock:
                 yield MessageEventResult().message(
                     f"✅ 已选择: {selected_stock['name']} ({selected_stock['code']})"
                 )
-            return selected_stock
+            yield selected_stock
         else:
-            return result
+            yield result
     
-    async def parse_and_validate_price(self, price_text: Optional[str], stock_code: str, stock_name: str) -> Optional[float]:
+    async def parse_and_validate_price(self, price_text: Optional[str], stock_code: str, stock_name: str) -> AsyncGenerator[Any, None]:
         """
         解析和验证价格的统一流程
+        
+        Yields:
+            MessageEventResult: 错误消息（如有）
+            float: 解析的价格值
         """
         success, error_msg, price = await self.trade_coordinator.parse_and_validate_price(
             price_text, stock_code, stock_name
         )
         if not success:
             yield MessageEventResult().message(error_msg)
-            return None
+            yield None
+            return
         
-        return price
+        yield price
     
-    async def get_stock_info_with_validation(self, stock_code: str) -> Optional[StockInfo]:
+    async def get_stock_info_with_validation(self, stock_code: str) -> AsyncGenerator[Any, None]:
         """
         获取股票信息并验证的统一流程
+        
+        Yields:
+            MessageEventResult: 错误消息（如有）
+            StockInfo: 股票信息对象
         """
         success, error_msg, stock_info = await self.trade_coordinator.get_stock_realtime_info(stock_code)
         if not success:
             yield MessageEventResult().message(error_msg)
-            return None
+            yield None
+            return
         
-        return stock_info
+        yield stock_info
     
     async def confirm_trade_with_user(self, event: AstrMessageEvent, stock_name: str, stock_code: str,
                                     trade_type: str, volume: int, price: Optional[float], 
-                                    current_price: float) -> Optional[bool]:
+                                    current_price: float) -> AsyncGenerator[Any, None]:
         """
         与用户确认交易的统一流程
+        
+        Yields:
+            MessageEventResult: 错误消息（如有）
+            bool: 用户确认结果
         """
         confirmation_message = self.trade_coordinator.format_trading_confirmation(
             stock_name, stock_code, trade_type, volume, price, current_price
@@ -119,54 +139,67 @@ class BaseTradingHandler(ABC):
         confirmation_result, error_msg = await self.user_interaction.wait_for_trade_confirmation(event, trade_info)
         if error_msg:
             yield MessageEventResult().message(error_msg)
-            return None
-        return confirmation_result
+            yield None
+            return
+        yield confirmation_result
     
     async def execute_trade_flow(self, event: AstrMessageEvent, require_price: bool = False) -> AsyncGenerator[MessageEventResult, None]:
         """
         完整交易流程的模板方法
         """
         # 1. 验证用户并解析参数
+        success, user, params = None, None, None
         async for result in self.validate_user_and_parse_params(event, require_price):
-            if result:
+            if isinstance(result, MessageEventResult):
+                yield result  # 转发错误消息
+            else:
                 success, user, params = result
-                if not success:
-                    return
                 break
-        else:
+        
+        if not success:
             return
         
         # 2. 搜索并选择股票
-        async for selected_stock in self.search_and_select_stock(event, params['keyword']):
-            if not selected_stock:
-                yield MessageEventResult().message("❌ 股票选择已取消")
-                return
-            break
-        else:
+        selected_stock = None
+        async for result in self.search_and_select_stock(event, params['keyword']):
+            if isinstance(result, MessageEventResult):
+                yield result  # 转发消息
+            else:
+                selected_stock = result
+                break
+        
+        if not selected_stock:
+            yield MessageEventResult().message("❌ 股票选择已取消")
             return
         
         stock_code = selected_stock['code']
         stock_name = selected_stock['name']
         
         # 3. 获取股票实时信息
-        async for stock_info in self.get_stock_info_with_validation(stock_code):
-            if not stock_info:
-                return
-            break
-        else:
+        stock_info = None
+        async for result in self.get_stock_info_with_validation(stock_code):
+            if isinstance(result, MessageEventResult):
+                yield result  # 转发错误消息
+            else:
+                stock_info = result
+                break
+        
+        if not stock_info:
             return
         
         # 4. 解析价格（如果有）
         price = None
         if params.get('price_text'):
-            async for parsed_price in self.parse_and_validate_price(
+            async for result in self.parse_and_validate_price(
                 params['price_text'], stock_code, stock_name
             ):
-                price = parsed_price
-                if price is None:
-                    return
-                break
-            else:
+                if isinstance(result, MessageEventResult):
+                    yield result  # 转发错误消息
+                else:
+                    price = result
+                    break
+            
+            if price is None:
                 return
         
         # 5. 执行具体交易逻辑（由子类实现）
@@ -224,16 +257,20 @@ class BuyOrderHandler(BaseTradingHandler):
         current_price = stock_info.current_price
         
         # 与用户确认交易
-        async for confirmation in self.confirm_trade_with_user(
+        confirmation = None
+        async for result in self.confirm_trade_with_user(
             event, stock_info.name, stock_info.code, trade_type, volume, price, current_price
         ):
-            if confirmation is None:  # 超时
-                return
-            elif not confirmation:  # 取消
-                yield self.format_info_result("💭 交易已取消")
-                return
-            break
-        else:
+            if isinstance(result, MessageEventResult):
+                yield result  # 转发错误消息
+            else:
+                confirmation = result
+                break
+        
+        if confirmation is None:  # 超时
+            return
+        elif not confirmation:  # 取消
+            yield self.format_info_result("💭 交易已取消")
             return
         
         # 执行买入交易
@@ -273,16 +310,20 @@ class SellOrderHandler(BaseTradingHandler):
         current_price = stock_info.current_price
         
         # 与用户确认交易
-        async for confirmation in self.confirm_trade_with_user(
+        confirmation = None
+        async for result in self.confirm_trade_with_user(
             event, stock_info.name, stock_info.code, trade_type, volume, price, current_price
         ):
-            if confirmation is None:  # 超时
-                return
-            elif not confirmation:  # 取消
-                yield self.format_info_result("💭 交易已取消")
-                return
-            break
-        else:
+            if isinstance(result, MessageEventResult):
+                yield result  # 转发错误消息
+            else:
+                confirmation = result
+                break
+        
+        if confirmation is None:  # 超时
+            return
+        elif not confirmation:  # 取消
+            yield self.format_info_result("💭 交易已取消")
             return
         
         # 执行卖出交易
