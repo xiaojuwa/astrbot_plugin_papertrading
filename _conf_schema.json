@@ -1,34 +1,38 @@
 {
   "monitor_interval": {
     "type": "int",
-    "name": "轮询间隔",
-    "description": "挂单监控轮询间隔（秒），设为0时暂停监控，范围0-300秒",
+    "name": "🔍 挂单监控轮询间隔（秒）",
+    "description": "🔍 挂单监控轮询间隔（秒）",
     "default": 15,
     "min": 0,
-    "max": 300
+    "max": 300,
+    "hint": "自动监控挂单的间隔时间，设为0时暂停监控，范围0-300秒"
   },
   "initial_balance": {
     "type": "int",
-    "name": "初始资金",
-    "description": "用户注册时的初始资金（元），范围0-1000000元",
+    "name": "💰 用户注册时的初始资金（元）",
+    "description": "💰 用户注册时的初始资金（元）",
     "default": 1000000,
     "min": 0,
-    "max": 1000000
+    "max": 10000000,
+    "hint": "新用户注册时获得的虚拟资金额度，范围0-10000000元"
   },
   "commission_rate": {
     "type": "float",
-    "name": "手续费率",
-    "description": "交易手续费率（小数形式），范围0-0.0005（即0%-0.05%）",
+    "name": "💳 交易手续费率（小数形式）",
+    "description": "💳 交易手续费率（小数形式）",
     "default": 0.0003,
     "min": 0.0,
-    "max": 0.0005
+    "max": 0.0005,
+    "hint": "每笔交易的手续费比例，范围0-0.0005（即0%-0.05%）"
   },
   "min_commission": {
     "type": "float",
-    "name": "最小手续费",
-    "description": "最小手续费金额（元），确保小额交易的最低收费",
+    "name": "💸 最小手续费金额（元）",
+    "description": "💸 最小手续费金额（元）",
     "default": 5.0,
     "min": 0.0,
-    "max": 50.0
+    "max": 50.0,
+    "hint": "小额交易的最低手续费"
   }
 }
