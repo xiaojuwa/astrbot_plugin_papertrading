@@ -1,4 +1,5 @@
 """股票数据模型"""
+import math
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, Optional
 import time
@@ -41,11 +42,13 @@ class StockInfo:
     
     def is_limit_up(self) -> bool:
         """是否涨停"""
-        return abs(self.current_price - self.limit_up) < 0.01
+        # 使用math.isclose进行更精确的浮点数比较
+        return math.isclose(self.current_price, self.limit_up, abs_tol=0.01)
     
     def is_limit_down(self) -> bool:
         """是否跌停"""
-        return abs(self.current_price - self.limit_down) < 0.01
+        # 使用math.isclose进行更精确的浮点数比较
+        return math.isclose(self.current_price, self.limit_down, abs_tol=0.01)
     
     def can_buy_at_price(self, price: float) -> bool:
         """检查是否可以以指定价格买入"""

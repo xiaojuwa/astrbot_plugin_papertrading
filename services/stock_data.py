@@ -17,6 +17,10 @@ class StockDataService:
     def __init__(self, storage: DataStorage):
         self.storage = storage
         self._cache_ttl = 30  # 缓存30秒
+        # 获取插件配置，传递给EastMoneyAPIService
+        self._config = None
+        if hasattr(storage, 'config'):
+            self._config = storage.config
     
     async def get_stock_info(self, stock_code: str, use_cache: bool = True, skip_limit_calculation: bool = False) -> Optional[StockInfo]:
         """
@@ -65,7 +69,7 @@ class StockDataService:
             股票信息对象或None
         """
         try:
-            async with EastMoneyAPIService() as api:
+            async with EastMoneyAPIService(self._config) as api:
                 raw_data = await api.get_stock_realtime_data(stock_code)
                 
                 if not raw_data:
@@ -215,7 +219,7 @@ class StockDataService:
             股票列表
         """
         try:
-            async with EastMoneyAPIService() as api:
+            async with EastMoneyAPIService(self._config) as api:
                 # 尝试直接获取股票信息
                 stock_info = await api.get_stock_realtime_data(keyword)
                 if stock_info:
@@ -242,7 +246,7 @@ class StockDataService:
             股票候选列表: [{'code', 'name', 'market'}]
         """
         try:
-            async with EastMoneyAPIService() as api:
+            async with EastMoneyAPIService(self._config) as api:
                 return await api.search_stocks_fuzzy(keyword)
         except Exception as e:
             logger.error(f"模糊搜索股票失败: {e}")
@@ -261,7 +265,7 @@ class StockDataService:
         results = {}
         
         try:
-            async with EastMoneyAPIService() as api:
+            async with EastMoneyAPIService(self._config) as api:
                 raw_data_dict = await api.batch_get_stocks_data(stock_codes)
                 
                 for code, raw_data in raw_data_dict.items():

@@ -100,8 +100,9 @@ class MarketRulesEngine:
         # 印花税（买入免征）
         stamp_tax = 0
         
-        # 过户费（上海股票收取，按成交金额的0.002%，最低1元）
-        transfer_fee = max(1, stock_amount * 0.00002)
+        # 过户费（从配置中读取费率）
+        transfer_fee_rate = self.storage.get_plugin_config_value('transfer_fee_rate', 0.00002)
+        transfer_fee = max(1, stock_amount * transfer_fee_rate)
         
         return stock_amount + commission + stamp_tax + transfer_fee
     
@@ -113,11 +114,13 @@ class MarketRulesEngine:
         # 手续费计算
         commission = self.calculate_commission(stock_amount)
         
-        # 印花税（卖出征收0.1%）
-        stamp_tax = stock_amount * 0.001
+        # 印花税（卖出征收，从配置中读取税率）
+        stamp_tax_rate = self.storage.get_plugin_config_value('stamp_tax_rate', 0.001)
+        stamp_tax = stock_amount * stamp_tax_rate
         
-        # 过户费
-        transfer_fee = max(1, stock_amount * 0.00002)
+        # 过户费（从配置中读取费率）
+        transfer_fee_rate = self.storage.get_plugin_config_value('transfer_fee_rate', 0.00002)
+        transfer_fee = max(1, stock_amount * transfer_fee_rate)
         
         return stock_amount - commission - stamp_tax - transfer_fee
     
@@ -147,11 +150,7 @@ class MarketRulesEngine:
         
         return True, ""
     
-    def apply_t_plus_one_rule(self, position: Position, buy_volume: int):
-        """应用T+1规则"""
-        # 买入的股票当日不能卖出
-        # 这里不增加available_volume，需要在第二天开盘前调用make_available_for_sale
-        pass
+
     
     def make_positions_available_for_next_day(self, user_id: str):
         """使持仓可在下一交易日卖出（T+1规则）"""

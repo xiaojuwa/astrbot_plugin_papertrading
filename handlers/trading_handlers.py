@@ -6,39 +6,43 @@ from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from .base_trading_handler import BuyOrderHandler, SellOrderHandler
 from ..services.trade_coordinator import TradeCoordinator
 from ..services.user_interaction import UserInteractionService
+from ..services.trading_engine import TradingEngine
 
 
 class TradingCommandHandlers:
     """交易命令处理器集合"""
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, trading_engine: TradingEngine):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
+        self.trading_engine = trading_engine
         
-        # 初始化具体处理器
-        self.market_buy_handler = MarketBuyHandler(trade_coordinator, user_interaction)
-        self.limit_buy_handler = LimitBuyHandler(trade_coordinator, user_interaction)
-        self.market_sell_handler = MarketSellHandler(trade_coordinator, user_interaction)
-        self.limit_sell_handler = LimitSellHandler(trade_coordinator, user_interaction)
+        # 移除冗余子类，直接实例化基类并传入描述信息
+        self.buy_handler = BuyOrderHandler(trade_coordinator, user_interaction, trading_engine)
+        self.sell_handler = SellOrderHandler(trade_coordinator, user_interaction, trading_engine)
     
     async def handle_market_buy(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """市价买入处理"""
-        async for result in self.market_buy_handler.execute_trade_flow(event, require_price=False):
+        self.buy_handler.set_action_description("市价买入")
+        async for result in self.buy_handler.execute_trade_flow(event, require_price=False):
             yield result
     
     async def handle_limit_buy(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """限价买入处理"""
-        async for result in self.limit_buy_handler.execute_trade_flow(event, require_price=True):
+        self.buy_handler.set_action_description("限价买入")
+        async for result in self.buy_handler.execute_trade_flow(event, require_price=True):
             yield result
     
     async def handle_market_sell(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """市价卖出处理"""
-        async for result in self.market_sell_handler.execute_trade_flow(event, require_price=False):
+        self.sell_handler.set_action_description("市价卖出")
+        async for result in self.sell_handler.execute_trade_flow(event, require_price=False):
             yield result
     
     async def handle_limit_sell(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """限价卖出处理"""
-        async for result in self.limit_sell_handler.execute_trade_flow(event, require_price=True):
+        self.sell_handler.set_action_description("限价卖出")
+        async for result in self.sell_handler.execute_trade_flow(event, require_price=True):
             yield result
     
     async def handle_cancel_order(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
@@ -60,13 +64,8 @@ class TradingCommandHandlers:
         order_id = params[0]
         
         try:
-            from ..services.trading_engine import TradingEngine
-            trading_engine = TradingEngine(
-                self.trade_coordinator.storage, 
-                self.trade_coordinator.stock_service
-            )
-            
-            success, message = await trading_engine.cancel_order(user_id, order_id)
+            # 使用注入的trading_engine实例，避免局部导入
+            success, message = await self.trading_engine.cancel_order(user_id, order_id)
             
             if success:
                 yield MessageEventResult().message(f"✅ {message}")
@@ -78,29 +77,3 @@ class TradingCommandHandlers:
             yield MessageEventResult().message("❌ 撤单失败，请稍后重试")
 
 
-class MarketBuyHandler(BuyOrderHandler):
-    """市价买入处理器"""
-    
-    def get_action_description(self) -> str:
-        return "市价买入"
-
-
-class LimitBuyHandler(BuyOrderHandler):
-    """限价买入处理器"""
-    
-    def get_action_description(self) -> str:
-        return "限价买入"
-
-
-class MarketSellHandler(SellOrderHandler):
-    """市价卖出处理器"""
-    
-    def get_action_description(self) -> str:
-        return "市价卖出"
-
-
-class LimitSellHandler(SellOrderHandler):
-    """限价卖出处理器"""
-    
-    def get_action_description(self) -> str:
-        return "限价卖出"

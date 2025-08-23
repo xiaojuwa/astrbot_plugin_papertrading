@@ -2,6 +2,7 @@
 完整的模拟股票交易系统，支持买卖、挂单、持仓管理等功能
 """
 import asyncio
+from datetime import datetime, time as dt_time, timedelta
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
 from astrbot.api.star import Context, Star
 from astrbot.api import logger, AstrBotConfig
@@ -15,7 +16,9 @@ from .handlers.user_handlers import UserCommandHandlers
 from .services.trade_coordinator import TradeCoordinator
 from .services.user_interaction import UserInteractionService
 from .services.stock_data import StockDataService
+from .services.trading_engine import TradingEngine
 from .services.order_monitor import OrderMonitorService
+from .services.market_rules import MarketRulesEngine
 from .utils.data_storage import DataStorage
 
 
@@ -52,21 +55,25 @@ class PaperTradingPlugin(Star):
         # 股票数据服务
         self.stock_service = StockDataService(self.storage)
         
+        # 交易引擎（依赖注入）
+        self.trading_engine = TradingEngine(self.storage, self.stock_service)
+        
         # 交易协调器服务
         self.trade_coordinator = TradeCoordinator(self.storage, self.stock_service)
         
         # 用户交互服务
         self.user_interaction = UserInteractionService()
         
-        # 挂单监控服务
-        self.order_monitor = OrderMonitorService(self.storage)
+        # 挂单监控服务（修复参数不匹配问题）
+        self.order_monitor = OrderMonitorService(self.storage, self.stock_service)
     
     def _initialize_handlers(self):
         """初始化命令处理器"""
-        # 交易命令处理器
+        # 交易命令处理器（注入TradingEngine）
         self.trading_handlers = TradingCommandHandlers(
             self.trade_coordinator, 
-            self.user_interaction
+            self.user_interaction,
+            self.trading_engine
         )
         
         # 查询命令处理器
@@ -110,9 +117,7 @@ class PaperTradingPlugin(Star):
             logger.error(f"插件停止时出错: {e}")
     
     async def _daily_maintenance_task(self):
-        """每日维护任务"""
-        from datetime import datetime, time as dt_time
-        
+        """每日维护任务"""        
         while True:
             try:
                 # 每天凌晨2点执行维护
@@ -120,7 +125,8 @@ class PaperTradingPlugin(Star):
                 target_time = datetime.combine(now.date(), dt_time(2, 0))
                 
                 if now > target_time:
-                    target_time = target_time.replace(day=target_time.day + 1)
+                    # 修复日期计算错误：使用timedelta避免跨月问题
+                    target_time = target_time + timedelta(days=1)
                 
                 sleep_seconds = (target_time - now).total_seconds()
                 await asyncio.sleep(sleep_seconds)
@@ -141,14 +147,12 @@ class PaperTradingPlugin(Star):
             all_users = self.storage.get_all_users()
             for user_id in all_users:
                 try:
-                    from .services.market_rules import MarketRulesEngine
+                    # 使用已初始化的服务实例，避免局部导入
                     market_rules = MarketRulesEngine(self.storage)
                     market_rules.make_positions_available_for_next_day(user_id)
                     
-                    # 更新用户总资产
-                    from .services.trading_engine import TradingEngine
-                    trading_engine = TradingEngine(self.storage, self.stock_service)
-                    await trading_engine.update_user_assets(user_id)
+                    # 更新用户总资产（使用已有的trading_engine实例）
+                    await self.trading_engine.update_user_assets(user_id)
                 except Exception as e:
                     logger.error(f"更新用户 {user_id} 数据失败: {e}")
             

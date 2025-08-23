@@ -3,24 +3,31 @@ import asyncio
 import time
 from typing import List
 from astrbot.api import logger
+from astrbot.core.star.star_tools import StarTools
+from astrbot.core.message.message_event_result import MessageEventResult
 from ..models.order import Order, OrderStatus
 from ..models.user import User
 from ..models.position import Position
 from ..utils.data_storage import DataStorage
 from .stock_data import StockDataService
 from .trading_engine import TradingEngine
+from .market_rules import MarketRulesEngine
 
 
 class OrderMonitorService:
     """挂单监控服务"""
     
-    def __init__(self, storage: DataStorage):
+    def __init__(self, storage: DataStorage, stock_service: StockDataService):
         self.storage = storage
-        self.stock_service = StockDataService(storage)
-        self.trading_engine = TradingEngine(storage)
+        self.stock_service = stock_service
+        # 修复TradingEngine实例化参数不匹配问题
+        self.trading_engine = TradingEngine(storage, stock_service)
         self._running = False
         self._task = None
         self._paused = False  # 新增：暂停状态
+        # 在__init__中初始化所有实例属性
+        self._last_order_count = 0
+        self._stock_error_count = {}
     
     async def start_monitoring(self):
         """开始监控"""
@@ -109,7 +116,7 @@ class OrderMonitorService:
         
         # 减少日志频率 - 只在订单数量变化时输出
         order_count = len(pending_orders)
-        if not hasattr(self, '_last_order_count') or self._last_order_count != order_count:
+        if self._last_order_count != order_count:
             logger.info(f"监控 {order_count} 个待成交订单")
             self._last_order_count = order_count
         
@@ -144,8 +151,6 @@ class OrderMonitorService:
         stock_info = await self.stock_service.get_stock_info(stock_code)
         if not stock_info:
             # 减少错误日志频率
-            if not hasattr(self, '_stock_error_count'):
-                self._stock_error_count = {}
             if self._stock_error_count.get(stock_code, 0) % 5 == 0:
                 logger.warning(f"无法获取股票 {stock_code} 的信息")
             self._stock_error_count[stock_code] = self._stock_error_count.get(stock_code, 0) + 1
@@ -218,7 +223,6 @@ class OrderMonitorService:
         fill_price = stock_info.current_price
         
         # 计算实际费用
-        from .market_rules import MarketRulesEngine
         market_rules = MarketRulesEngine(self.storage)
         total_cost = market_rules.calculate_buy_amount(order.order_volume, fill_price)
         
@@ -297,7 +301,6 @@ class OrderMonitorService:
         fill_price = stock_info.current_price
         
         # 计算实际收入
-        from .market_rules import MarketRulesEngine
         market_rules = MarketRulesEngine(self.storage)
         total_income = market_rules.calculate_sell_amount(order.order_volume, fill_price)
         
@@ -354,8 +357,6 @@ class OrderMonitorService:
     async def _send_fill_notification(self, order: Order, fill_price: float, action: str, total_amount: float = None):
         """向用户发送成交通知"""
         try:
-            from astrbot.core.star.star_tools import StarTools
-            from astrbot.core.message.message_event_result import MessageEventResult
             
             # 构造成交通知消息
             if action == "买入":

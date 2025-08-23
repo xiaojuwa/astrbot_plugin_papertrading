@@ -54,10 +54,7 @@ class Order:
         if self.update_time == 0:
             self.update_time = int(time.time())
     
-    def set_order_id_from_storage(self, storage):
-        """从存储中获取订单号"""
-        if hasattr(storage, 'get_next_order_number'):
-            self.order_id = storage.get_next_order_number()
+
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

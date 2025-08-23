@@ -70,7 +70,12 @@ class TradingEngine:
             return False, error_msg, None
         
         # 验证通过后生成订单号
-        order.set_order_id_from_storage(self.storage)
+        if hasattr(self.storage, 'get_next_order_number'):
+            order.order_id = self.storage.get_next_order_number()
+        else:
+            # 兜底方案：使用时间戳+随机数
+            import uuid
+            order.order_id = str(int(time.time() * 1000))[-8:] + str(uuid.uuid4())[-4:]
         
         # 6. 检查交易时间
         is_trading_time = market_time_manager.is_trading_time()
@@ -148,7 +153,12 @@ class TradingEngine:
             return False, error_msg, None
         
         # 验证通过后生成订单号
-        order.set_order_id_from_storage(self.storage)
+        if hasattr(self.storage, 'get_next_order_number'):
+            order.order_id = self.storage.get_next_order_number()
+        else:
+            # 兜底方案：使用时间戳+随机数
+            import uuid
+            order.order_id = str(int(time.time() * 1000))[-8:] + str(uuid.uuid4())[-4:]
         
         # 7. 检查交易时间
         is_trading_time = market_time_manager.is_trading_time()

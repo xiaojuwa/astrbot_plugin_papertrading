@@ -13,8 +13,9 @@ except ImportError:
 class EastMoneyAPIService:
     """东方财富API服务"""
     
-    def __init__(self):
+    def __init__(self, config=None):
         self.session = None
+        self.config = config
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': '*/*',
@@ -22,6 +23,8 @@ class EastMoneyAPIService:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive'
         }
+        # 默认API令牌
+        self._default_token = 'D43BF722C8E33BDC906FB84D85E326E8'
         
         # 常用股票代码映射
         self.code_id_dict = {
@@ -80,7 +83,7 @@ class EastMoneyAPIService:
         params = {
             'input': code,
             'type': '14',
-            'token': 'D43BF722C8E33BDC906FB84D85E326E8',
+            'token': self._get_api_token(),
             'count': '10'  # 增加搜索结果数量，支持模糊搜索
         }
         
@@ -131,7 +134,7 @@ class EastMoneyAPIService:
         params = {
             'input': keyword,
             'type': '14',
-            'token': 'D43BF722C8E33BDC906FB84D85E326E8',
+            'token': self._get_api_token(),
             'count': '8'  # 返回8个候选结果
         }
         
@@ -184,6 +187,13 @@ class EastMoneyAPIService:
             logger.error(f"模糊搜索股票失败 {keyword}: {e}")
         
         return []
+    
+    def _get_api_token(self) -> str:
+        """获取API令牌，从配置读取，留空则使用默认值"""
+        if self.config:
+            token = self.config.get('eastmoney_api_token', '').strip()
+            return token if token else self._default_token
+        return self._default_token
     
     def _get_market_name(self, code: str) -> str:
         """获取市场名称"""
@@ -305,20 +315,19 @@ class EastMoneyAPIService:
         """
         results = {}
         
-        # 创建并发任务
-        tasks = []
-        for code in stock_codes:
-            task = self.get_stock_realtime_data(code)
-            tasks.append((code, task))
+        # 修复并发问题：使用asyncio.gather实现真正的并发
+        tasks = [self.get_stock_realtime_data(code) for code in stock_codes]
         
-        # 并发执行
-        for code, task in tasks:
-            try:
-                data = await task
-                if data:
-                    results[code] = data
-            except Exception as e:
-                logger.error(f"获取股票数据失败 {code}: {e}")
+        # 并发执行所有任务
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理结果
+        for i, result in enumerate(results_list):
+            code = stock_codes[i]
+            if isinstance(result, Exception):
+                logger.error(f"获取股票数据失败 {code}: {result}")
+            elif result:
+                results[code] = result
         
         return results
 

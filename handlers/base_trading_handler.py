@@ -8,6 +8,7 @@ from ..models.stock import StockInfo
 from ..models.user import User
 from ..services.trade_coordinator import TradeCoordinator
 from ..services.user_interaction import UserInteractionService
+from ..services.trading_engine import TradingEngine
 
 
 class BaseTradingHandler(ABC):
@@ -16,9 +17,15 @@ class BaseTradingHandler(ABC):
     提供所有交易命令的公共功能
     """
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, trading_engine: TradingEngine):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
+        self.trading_engine = trading_engine
+        self._action_description = "交易操作"  # 默认描述
+    
+    def set_action_description(self, description: str):
+        """设置操作描述（用于用户提示）"""
+        self._action_description = description
     
     async def validate_user_and_parse_params(self, event: AstrMessageEvent, 
                                            require_price: bool = False) -> AsyncGenerator[Any, None]:
@@ -65,7 +72,7 @@ class BaseTradingHandler(ABC):
         if result.get("multiple"):
             candidates = result["candidates"]
             selected_stock, error_msg = await self.user_interaction.wait_for_stock_selection(
-                event, candidates, self.get_action_description()
+                event, candidates, self._action_description
             )
             if error_msg:
                 yield MessageEventResult().message(error_msg)
@@ -224,10 +231,9 @@ class BaseTradingHandler(ABC):
         """
         pass
     
-    @abstractmethod
     def get_action_description(self) -> str:
         """获取操作描述（用于用户提示）"""
-        pass
+        return self._action_description
     
     def format_success_result(self, message: str) -> MessageEventResult:
         """格式化成功结果"""
@@ -244,9 +250,6 @@ class BaseTradingHandler(ABC):
 
 class BuyOrderHandler(BaseTradingHandler):
     """买入订单处理器基类"""
-    
-    def get_action_description(self) -> str:
-        return "买入操作"
     
     async def execute_specific_trade(self, event: AstrMessageEvent, user: User, 
                                    stock_info: StockInfo, volume: int, 
@@ -273,15 +276,9 @@ class BuyOrderHandler(BaseTradingHandler):
             yield self.format_info_result("💭 交易已取消")
             return
         
-        # 执行买入交易
-        from ..services.trading_engine import TradingEngine
-        trading_engine = TradingEngine(
-            self.trade_coordinator.storage, 
-            self.trade_coordinator.stock_service
-        )
-        
+        # 执行买入交易（使用注入的trading_engine，避免局部导入）
         try:
-            success, message, order = await trading_engine.place_buy_order(
+            success, message, order = await self.trading_engine.place_buy_order(
                 user.user_id, stock_info.code, volume, price
             )
             
@@ -297,9 +294,6 @@ class BuyOrderHandler(BaseTradingHandler):
 
 class SellOrderHandler(BaseTradingHandler):
     """卖出订单处理器基类"""
-    
-    def get_action_description(self) -> str:
-        return "卖出操作"
     
     async def execute_specific_trade(self, event: AstrMessageEvent, user: User, 
                                    stock_info: StockInfo, volume: int, 
@@ -326,15 +320,9 @@ class SellOrderHandler(BaseTradingHandler):
             yield self.format_info_result("💭 交易已取消")
             return
         
-        # 执行卖出交易
-        from ..services.trading_engine import TradingEngine
-        trading_engine = TradingEngine(
-            self.trade_coordinator.storage, 
-            self.trade_coordinator.stock_service
-        )
-        
+        # 执行卖出交易（使用注入的trading_engine，避免局部导入）
         try:
-            success, message, order = await trading_engine.place_sell_order(
+            success, message, order = await self.trading_engine.place_sell_order(
                 user.user_id, stock_info.code, volume, price
             )
             

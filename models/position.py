@@ -59,10 +59,9 @@ class Position:
         self.total_volume -= volume
         self.available_volume -= volume
         
-        # 按比例减少总成本
+        # 更稳健的成本计算：直接使用平均成本扣减，避免精度累积问题
         if self.total_volume > 0:
-            cost_ratio = volume / (self.total_volume + volume)
-            self.total_cost -= self.total_cost * cost_ratio
+            self.total_cost -= self.avg_cost * volume
         else:
             self.total_cost = 0
             self.avg_cost = 0

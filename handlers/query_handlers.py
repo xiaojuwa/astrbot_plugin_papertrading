@@ -1,8 +1,11 @@
 """查询命令处理器 - 处理所有查询相关命令"""
+import asyncio
 from typing import AsyncGenerator, List, Dict, Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
 
+from ..models.user import User
+from ..models.position import Position
 from ..services.trade_coordinator import TradeCoordinator
 from ..services.user_interaction import UserInteractionService
 from ..utils.formatters import Formatters
@@ -31,7 +34,6 @@ class QueryCommandHandlers:
             await self.trade_coordinator.update_user_assets_if_needed(user_id)
             
             # 获取最新用户数据
-            from ..models.user import User
             user_data = self.trade_coordinator.storage.get_user(user_id)
             user = User.from_dict(user_data)
             
@@ -43,7 +45,6 @@ class QueryCommandHandlers:
                 if pos_data['total_volume'] > 0:
                     stock_info = await self.trade_coordinator.stock_service.get_stock_info(pos_data['stock_code'])
                     if stock_info:
-                        from ..models.position import Position
                         position = Position.from_dict(pos_data)
                         position.update_market_data(stock_info.current_price)
                         self.trade_coordinator.storage.save_position(user_id, position.stock_code, position.to_dict())
@@ -131,11 +132,23 @@ class QueryCommandHandlers:
             all_users_data = self.trade_coordinator.storage.get_all_users()
             users_list = []
             
+            # 筛选同会话用户
+            same_session_users = []
             for user_id, user_data in all_users_data.items():
                 # 只包含相同会话（群聊）的用户
                 if user_id.startswith(session_prefix) and user_id.endswith(session_suffix):
-                    # 更新用户总资产
-                    await self.trade_coordinator.update_user_assets_if_needed(user_id)
+                    same_session_users.append(user_id)
+            
+            # 使用并发批量更新用户资产，提高性能
+            if same_session_users:
+                update_tasks = [
+                    self.trade_coordinator.update_user_assets_if_needed(user_id)
+                    for user_id in same_session_users
+                ]
+                await asyncio.gather(*update_tasks, return_exceptions=True)
+                
+                # 获取更新后的用户数据
+                for user_id in same_session_users:
                     updated_user_data = self.trade_coordinator.storage.get_user(user_id)
                     if updated_user_data:
                         users_list.append(updated_user_data)
