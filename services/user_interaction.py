@@ -52,21 +52,25 @@ class UserInteractionService:
         
         try:
             # 创建会话等待器
+            selected_result = None
+            
             @session_waiter(timeout=60, record_history_chains=False)
             async def stock_selection_waiter(controller: SessionController, wait_event: AstrMessageEvent):
+                nonlocal selected_result
                 user_input = wait_event.message_str.strip()
                 
                 # 检查取消命令
                 if user_input.lower() in ['取消', 'cancel', '0', 'q', 'quit']:
-                    controller.stop(result=None)
+                    selected_result = None
+                    controller.stop()
                     return
                 
                 # 尝试解析数字选择
                 try:
                     choice_num = int(user_input)
                     if 1 <= choice_num <= min(len(candidates), 5):
-                        selected_stock = candidates[choice_num - 1]
-                        controller.stop(result=selected_stock)
+                        selected_result = candidates[choice_num - 1]
+                        controller.stop()
                         return
                     else:
                         # 无效选择，继续等待
@@ -78,10 +82,10 @@ class UserInteractionService:
                     return
             
             # 启动等待
-            selected_stock = await stock_selection_waiter(event)
-            if selected_stock is None:
+            await stock_selection_waiter(event)
+            if selected_result is None:
                 return None, "用户取消选择"
-            return selected_stock, None
+            return selected_result, None
             
         except asyncio.TimeoutError:
             return None, "⏰ 选择超时，操作已取消"
@@ -117,18 +121,23 @@ class UserInteractionService:
         
         try:
             # 创建会话等待器
+            confirmation_result = None
+            
             @session_waiter(timeout=60, record_history_chains=False)
             async def trade_confirmation_waiter(controller: SessionController, wait_event: AstrMessageEvent):
+                nonlocal confirmation_result
                 user_input = wait_event.message_str.strip().lower()
                 
                 # 检查确认命令
                 if user_input in ['确认', 'confirm', 'y', 'yes', '是', '1']:
-                    controller.stop(result=True)
+                    confirmation_result = True
+                    controller.stop()
                     return
                 
                 # 检查取消命令
                 if user_input in ['取消', 'cancel', 'n', 'no', '否', '0']:
-                    controller.stop(result=False)
+                    confirmation_result = False
+                    controller.stop()
                     return
                 
                 # 无效输入，继续等待
@@ -136,7 +145,7 @@ class UserInteractionService:
                 return
             
             # 启动等待
-            confirmation_result = await trade_confirmation_waiter(event)
+            await trade_confirmation_waiter(event)
             return confirmation_result, None
             
         except asyncio.TimeoutError:
@@ -169,13 +178,17 @@ class UserInteractionService:
         
         try:
             # 创建会话等待器
+            input_result = None
+            
             @session_waiter(timeout=timeout, record_history_chains=False)
             async def text_input_waiter(controller: SessionController, wait_event: AstrMessageEvent):
+                nonlocal input_result
                 user_input = wait_event.message_str.strip()
                 
                 # 检查取消命令
                 if user_input.lower() in ['取消', 'cancel', 'q', 'quit']:
-                    controller.stop(result=None)
+                    input_result = None
+                    controller.stop()
                     return
                 
                 # 验证输入
@@ -183,14 +196,15 @@ class UserInteractionService:
                     await wait_event.send(MessageChain([Plain("❌ 输入格式不正确，请重新输入")]))
                     return
                 
-                controller.stop(result=user_input)
+                input_result = user_input
+                controller.stop()
                 return
             
             # 启动等待
-            user_input = await text_input_waiter(event)
-            if user_input is None:
+            await text_input_waiter(event)
+            if input_result is None:
                 return None, "用户取消输入"
-            return user_input, None
+            return input_result, None
             
         except asyncio.TimeoutError:
             return None, "⏰ 输入超时，操作已取消"
@@ -233,20 +247,25 @@ class UserInteractionService:
         
         try:
             # 创建会话等待器
+            choice_result = None
+            
             @session_waiter(timeout=timeout, record_history_chains=False)
             async def choice_selection_waiter(controller: SessionController, wait_event: AstrMessageEvent):
+                nonlocal choice_result
                 user_input = wait_event.message_str.strip()
                 
                 # 检查取消命令
                 if user_input.lower() in ['取消', 'cancel', '0', 'q', 'quit']:
-                    controller.stop(result=None)
+                    choice_result = None
+                    controller.stop()
                     return
                 
                 # 尝试解析数字选择
                 try:
                     choice_num = int(user_input)
                     if 1 <= choice_num <= len(choices):
-                        controller.stop(result=choice_num - 1)  # 返回0-based索引
+                        choice_result = choice_num - 1  # 返回0-based索引
+                        controller.stop()
                         return
                     else:
                         await wait_event.send(MessageChain([Plain(f"❌ 无效选择，请输入 1-{len(choices)} 的数字")]))
@@ -256,10 +275,10 @@ class UserInteractionService:
                     return
             
             # 启动等待
-            selected_index = await choice_selection_waiter(event)
-            if selected_index is None:
+            await choice_selection_waiter(event)
+            if choice_result is None:
                 return None, "用户取消选择"
-            return selected_index, None
+            return choice_result, None
             
         except asyncio.TimeoutError:
             return None, "⏰ 选择超时，操作已取消"

@@ -1,7 +1,7 @@
 """股票数据服务 - 使用东方财富API重构版本"""
 import time
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from astrbot.api import logger
 
 from ..models.stock import StockInfo
@@ -73,13 +73,13 @@ class StockDataService:
                     return None
                 
                 # 构造StockInfo对象
-                return self._build_stock_info(raw_data)
+                return await self._build_stock_info(raw_data)
                 
         except Exception as e:
             logger.error(f"从东方财富API获取数据失败 {stock_code}: {e}")
             return None
     
-    def _build_stock_info(self, raw_data: Dict[str, Any]) -> StockInfo:
+    async def _build_stock_info(self, raw_data: Dict[str, Any]) -> StockInfo:
         """
         从原始数据构建StockInfo对象
         
@@ -91,6 +91,8 @@ class StockDataService:
         """
         current_price = raw_data.get('current_price', 0)
         close_price = raw_data.get('close_price', current_price)
+        stock_code = raw_data.get('code', '')
+        stock_name = raw_data.get('name', '')
         
         # 设置买卖价格 - 统一使用当前价格，不再使用买1卖1
         # 模拟交易简化处理，所有交易都按当前价格进行
@@ -99,10 +101,13 @@ class StockDataService:
         # 检查股票是否停牌
         is_suspended = self._check_if_suspended(raw_data)
         
+        # 获取涨跌停价格 - 根据交易时间选择不同的计算策略
+        limit_up, limit_down = await self._get_limit_prices(raw_data, stock_code, stock_name)
+        
         # 构建StockInfo对象
         stock_info = StockInfo(
-            code=raw_data.get('code', ''),
-            name=raw_data.get('name', ''),
+            code=stock_code,
+            name=stock_name,
             current_price=current_price,
             open_price=raw_data.get('open_price', current_price),
             close_price=close_price,
@@ -114,8 +119,8 @@ class StockDataService:
             ask1_price=trade_price,  # 统一使用当前价格
             change_percent=raw_data.get('change_percent', 0),
             change_amount=raw_data.get('change_amount', 0),
-            limit_up=raw_data.get('limit_up', 0),
-            limit_down=raw_data.get('limit_down', 0),
+            limit_up=limit_up,
+            limit_down=limit_down,
             is_suspended=is_suspended,
             update_time=int(time.time())
         )
@@ -146,6 +151,92 @@ class StockDataService:
             return volume == 0 and change_percent == 0
         
         return False
+    
+    async def _get_limit_prices(self, raw_data: Dict[str, Any], stock_code: str, stock_name: str) -> tuple[float, float]:
+        """
+        获取涨跌停价格 - 根据交易时间选择不同策略
+        
+        Args:
+            raw_data: API返回的原始数据
+            stock_code: 股票代码
+            stock_name: 股票名称
+            
+        Returns:
+            (涨停价, 跌停价)
+        """
+        current_time = datetime.now()
+        
+        # 判断是否在交易时间内（包括午休时间）
+        is_market_hours = self._is_market_hours(current_time)
+        
+        # 如果是交易时间（包括午休），使用API返回的涨跌停价格
+        if is_market_hours:
+            api_limit_up = raw_data.get('limit_up', 0)
+            api_limit_down = raw_data.get('limit_down', 0)
+            
+            # 如果API返回的涨跌停价格有效，直接使用
+            if api_limit_up > 0 and api_limit_down > 0:
+                logger.debug(f"交易时间，使用API涨跌停价格: 涨停 {api_limit_up}, 跌停 {api_limit_down}")
+                return api_limit_up, api_limit_down
+        
+        # 非交易时间或API数据无效时，使用PriceCalculator计算
+        logger.debug(f"非交易时间或API数据无效，使用PriceCalculator计算涨跌停价格")
+        try:
+            from ..utils.price_calculator import get_price_calculator
+            price_calc = get_price_calculator(self.storage)
+            
+            price_limits = await price_calc.calculate_price_limits(stock_code, stock_name, current_time)
+            calculated_limit_up = price_limits.get('limit_up', 0)
+            calculated_limit_down = price_limits.get('limit_down', 0)
+            
+            if calculated_limit_up > 0 and calculated_limit_down > 0:
+                logger.debug(f"计算得到涨跌停价格: 涨停 {calculated_limit_up}, 跌停 {calculated_limit_down}")
+                return calculated_limit_up, calculated_limit_down
+            else:
+                logger.warning(f"涨跌停价格计算失败，使用API原值")
+                
+        except Exception as e:
+            logger.error(f"计算涨跌停价格时出错: {e}")
+        
+        # 兜底：使用API原值
+        api_limit_up = raw_data.get('limit_up', 0)
+        api_limit_down = raw_data.get('limit_down', 0)
+        return api_limit_up, api_limit_down
+    
+    def _is_lunch_break(self, current_time: datetime) -> bool:
+        """
+        判断是否为中午休市时间 (11:30-13:00)
+        """
+        from .market_time import market_time_manager
+        if not market_time_manager.is_trading_day(current_time.date()):
+            return False
+            
+        current_time_only = current_time.time()
+        lunch_start = dt_time(11, 30)
+        lunch_end = dt_time(13, 0)
+        
+        return lunch_start <= current_time_only <= lunch_end
+    
+    def _is_market_hours(self, current_time: datetime) -> bool:
+        """
+        判断是否在市场开放时间内（交易时间 + 午休时间）
+        包括：
+        - 9:30-11:30 (上午交易)
+        - 11:30-13:00 (午休)
+        - 13:00-15:00 (下午交易)
+        """
+        # 首先检查是否为交易日
+        from .market_time import market_time_manager
+        if not market_time_manager.is_trading_day(current_time.date()):
+            return False
+        
+        current_time_only = current_time.time()
+        
+        # 市场时间范围：9:30-15:00 (包含午休时间)
+        market_start = dt_time(9, 30)
+        market_end = dt_time(15, 0)
+        
+        return market_start <= current_time_only <= market_end
     
     def _is_cache_valid(self, cache_data: Dict) -> bool:
         """
@@ -254,7 +345,7 @@ class StockDataService:
                 
                 for code, raw_data in raw_data_dict.items():
                     try:
-                        stock_info = self._build_stock_info(raw_data)
+                        stock_info = await self._build_stock_info(raw_data)
                         results[code] = stock_info
                         
                         # 保存到缓存
