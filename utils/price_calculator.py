@@ -68,12 +68,12 @@ class PriceCalculator:
     async def calculate_price_limits(self, stock_code: str, stock_name: str, 
                                    current_time: Optional[datetime] = None) -> Dict[str, float]:
         """
-        计算涨跌停价格
+        基于收盘价本地计算涨跌停价格
         
         Args:
             stock_code: 股票代码
-            stock_name: 股票名称
-            current_time: 当前时间，默认为系统当前时间
+            stock_name: 股票名称  
+            current_time: 当前时间，默认为系统当前时间（用于获取正确的基准价格）
             
         Returns:
             包含limit_up和limit_down的字典
@@ -81,10 +81,10 @@ class PriceCalculator:
         if current_time is None:
             current_time = datetime.now()
         
-        # 获取基准价格
-        base_price = await self._get_base_price(stock_code, current_time)
+        # 获取基准价格（通常是最近的收盘价）
+        base_price = await self._get_base_close_price(stock_code)
         if base_price is None or base_price <= 0:
-            logger.error(f"无法获取股票 {stock_code} 的基准价格")
+            logger.error(f"无法获取股票 {stock_code} 的基准收盘价")
             return {'limit_up': 0, 'limit_down': 0}
         
         # 识别股票类型
@@ -115,172 +115,33 @@ class PriceCalculator:
             'limit_ratio': limit_ratio
         }
     
-    async def _get_base_price(self, stock_code: str, current_time: datetime) -> Optional[float]:
+    async def _get_base_close_price(self, stock_code: str) -> Optional[float]:
         """
-        获取涨跌停计算的基准价格
+        获取基准收盘价（用于本地涨跌停计算）
         
         Args:
             stock_code: 股票代码
-            current_time: 当前时间
             
         Returns:
-            基准价格
+            基准收盘价
         """
-        # 判断当前时间场景
-        is_trading_day = market_time_manager.is_trading_day(current_time.date())
-        is_trading_time = market_time_manager.is_trading_time(current_time)
-        is_lunch_break = self._is_lunch_break(current_time)
-        is_before_market = self._is_before_market(current_time)
-        is_after_market = self._is_after_market(current_time)
-        
-        if is_trading_day:
-            if is_before_market:
-                # 1) 交易日开盘前：使用前一交易日收盘价
-                logger.debug(f"交易日开盘前，使用前一交易日收盘价计算涨跌停")
-                return await self._get_previous_trading_day_close_price(stock_code)
-            elif is_lunch_break:
-                # 2) 交易日午休：使用当日开盘价
-                logger.debug(f"交易日午休，使用当日开盘价计算涨跌停")
-                return await self._get_today_open_price(stock_code)
-            elif is_trading_time:
-                # 交易时间：使用当日开盘价
-                logger.debug(f"交易时间，使用当日开盘价计算涨跌停")
-                return await self._get_today_open_price(stock_code)
-            elif is_after_market:
-                # 3) 交易日收盘后：使用当日收盘价
-                logger.debug(f"交易日收盘后，使用当日收盘价计算涨跌停")
-                return await self._get_today_close_price(stock_code)
-        
-        # 4) 非交易日：使用最后交易日收盘价
-        logger.debug(f"非交易日，使用最后交易日收盘价计算涨跌停")
-        return await self._get_last_trading_day_close_price(stock_code)
-    
-    def _is_lunch_break(self, current_time: datetime) -> bool:
-        """
-        判断是否为中午休市时间 (11:30-13:00)
-        
-        Args:
-            current_time: 当前时间
-            
-        Returns:
-            是否为中午休市时间
-        """
-        if not market_time_manager.is_trading_day(current_time.date()):
-            return False
-        
-        current_time_only = current_time.time()
-        lunch_start = datetime.strptime("11:30", "%H:%M").time()
-        lunch_end = datetime.strptime("13:00", "%H:%M").time()
-        
-        return lunch_start <= current_time_only <= lunch_end
-    
-    def _is_before_market(self, current_time: datetime) -> bool:
-        """
-        判断是否为交易日开盘前 (9:30之前)
-        
-        Args:
-            current_time: 当前时间
-            
-        Returns:
-            是否为开盘前时间
-        """
-        if not market_time_manager.is_trading_day(current_time.date()):
-            return False
-        
-        current_time_only = current_time.time()
-        market_open = datetime.strptime("09:30", "%H:%M").time()
-        
-        return current_time_only < market_open
-    
-    def _is_after_market(self, current_time: datetime) -> bool:
-        """
-        判断是否为交易日收盘后 (15:00之后)
-        
-        Args:
-            current_time: 当前时间
-            
-        Returns:
-            是否为收盘后时间
-        """
-        if not market_time_manager.is_trading_day(current_time.date()):
-            return False
-        
-        current_time_only = current_time.time()
-        market_close = datetime.strptime("15:00", "%H:%M").time()
-        
-        return current_time_only > market_close
-    
-    async def _get_previous_trading_day_close_price(self, stock_code: str) -> Optional[float]:
-        """获取前一交易日收盘价"""
         try:
             from ..services.stock_data import StockDataService
             stock_service = StockDataService(self.storage) if self.storage else None
             
             if stock_service:
+                # 获取股票信息，跳过涨跌停计算（防止递归调用）
                 stock_info = await stock_service.get_stock_info(stock_code, skip_limit_calculation=True)
                 if stock_info and hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
-                    logger.debug(f"股票 {stock_code} 前一交易日收盘价: {stock_info.close_price}")
+                    logger.debug(f"股票 {stock_code} 基准收盘价: {stock_info.close_price}")
                     return stock_info.close_price
                     
-            logger.warning(f"无法获取股票 {stock_code} 的前一交易日收盘价")
+            logger.warning(f"无法获取股票 {stock_code} 的收盘价")
             return None
             
         except Exception as e:
-            logger.error(f"获取前一交易日收盘价失败: {e}")
+            logger.error(f"获取收盘价失败: {e}")
             return None
-    
-    async def _get_today_open_price(self, stock_code: str) -> Optional[float]:
-        """获取当日开盘价"""
-        try:
-            from ..services.stock_data import StockDataService
-            stock_service = StockDataService(self.storage) if self.storage else None
-            
-            if stock_service:
-                stock_info = await stock_service.get_stock_info(stock_code)
-                if stock_info:
-                    # 优先使用开盘价
-                    if hasattr(stock_info, 'open_price') and stock_info.open_price > 0:
-                        logger.debug(f"股票 {stock_code} 当日开盘价: {stock_info.open_price}")
-                        return stock_info.open_price
-                    # 如果没有开盘价，回退到前一交易日收盘价
-                    elif hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
-                        logger.debug(f"股票 {stock_code} 使用前一日收盘价作为开盘价: {stock_info.close_price}")
-                        return stock_info.close_price
-                    
-            logger.warning(f"无法获取股票 {stock_code} 的当日开盘价")
-            return None
-            
-        except Exception as e:
-            logger.error(f"获取当日开盘价失败: {e}")
-            return None
-    
-    async def _get_today_close_price(self, stock_code: str) -> Optional[float]:
-        """获取当日收盘价"""
-        try:
-            from ..services.stock_data import StockDataService
-            stock_service = StockDataService(self.storage) if self.storage else None
-            
-            if stock_service:
-                stock_info = await stock_service.get_stock_info(stock_code, skip_limit_calculation=True)
-                if stock_info:
-                    # 收盘后优先使用收盘价，如果没有则使用当前价
-                    if hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
-                        logger.debug(f"股票 {stock_code} 当日收盘价: {stock_info.close_price}")
-                        return stock_info.close_price
-                    elif hasattr(stock_info, 'current_price') and stock_info.current_price > 0:
-                        logger.debug(f"股票 {stock_code} 使用当前价作为收盘价: {stock_info.current_price}")
-                        return stock_info.current_price
-                        
-            logger.warning(f"无法获取股票 {stock_code} 的当日收盘价")
-            return None
-            
-        except Exception as e:
-            logger.error(f"获取当日收盘价失败: {e}")
-            return None
-    
-    async def _get_last_trading_day_close_price(self, stock_code: str) -> Optional[float]:
-        """获取最后交易日的收盘价（向后兼容方法）"""
-        return await self._get_previous_trading_day_close_price(stock_code)
     
     def parse_price_text(self, price_text: str, limit_up: float, limit_down: float) -> Optional[float]:
         """

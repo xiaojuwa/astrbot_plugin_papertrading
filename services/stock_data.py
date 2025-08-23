@@ -101,13 +101,15 @@ class StockDataService:
         # 检查股票是否停牌
         is_suspended = self._check_if_suspended(raw_data)
         
-        # 获取涨跌停价格 - 根据交易时间选择不同的计算策略
+        # 获取涨跌停价格 - 使用统一的价格服务
         if skip_limit_calculation:
             # 跳过涨跌停计算，直接使用API数据（防止递归调用）
             limit_up = raw_data.get('limit_up', 0)
             limit_down = raw_data.get('limit_down', 0)
         else:
-            limit_up, limit_down = await self._get_limit_prices(raw_data, stock_code, stock_name)
+            from .price_service import get_price_limit_service
+            price_service = get_price_limit_service(self.storage)
+            limit_up, limit_down = await price_service.get_limit_prices(raw_data, stock_code, stock_name)
         
         # 构建StockInfo对象
         stock_info = StockInfo(
@@ -156,92 +158,6 @@ class StockDataService:
             return volume == 0 and change_percent == 0
         
         return False
-    
-    async def _get_limit_prices(self, raw_data: Dict[str, Any], stock_code: str, stock_name: str) -> tuple[float, float]:
-        """
-        获取涨跌停价格 - 根据交易时间选择不同策略
-        
-        Args:
-            raw_data: API返回的原始数据
-            stock_code: 股票代码
-            stock_name: 股票名称
-            
-        Returns:
-            (涨停价, 跌停价)
-        """
-        current_time = datetime.now()
-        
-        # 判断是否在交易时间内（包括午休时间）
-        is_market_hours = self._is_market_hours(current_time)
-        
-        # 如果是交易时间（包括午休），使用API返回的涨跌停价格
-        if is_market_hours:
-            api_limit_up = raw_data.get('limit_up', 0)
-            api_limit_down = raw_data.get('limit_down', 0)
-            
-            # 如果API返回的涨跌停价格有效，直接使用
-            if api_limit_up > 0 and api_limit_down > 0:
-                logger.debug(f"交易时间，使用API涨跌停价格: 涨停 {api_limit_up}, 跌停 {api_limit_down}")
-                return api_limit_up, api_limit_down
-        
-        # 非交易时间或API数据无效时，使用PriceCalculator计算
-        logger.debug(f"非交易时间或API数据无效，使用PriceCalculator计算涨跌停价格")
-        try:
-            from ..utils.price_calculator import get_price_calculator
-            price_calc = get_price_calculator(self.storage)
-            
-            price_limits = await price_calc.calculate_price_limits(stock_code, stock_name, current_time)
-            calculated_limit_up = price_limits.get('limit_up', 0)
-            calculated_limit_down = price_limits.get('limit_down', 0)
-            
-            if calculated_limit_up > 0 and calculated_limit_down > 0:
-                logger.debug(f"计算得到涨跌停价格: 涨停 {calculated_limit_up}, 跌停 {calculated_limit_down}")
-                return calculated_limit_up, calculated_limit_down
-            else:
-                logger.warning(f"涨跌停价格计算失败，使用API原值")
-                
-        except Exception as e:
-            logger.error(f"计算涨跌停价格时出错: {e}")
-        
-        # 兜底：使用API原值
-        api_limit_up = raw_data.get('limit_up', 0)
-        api_limit_down = raw_data.get('limit_down', 0)
-        return api_limit_up, api_limit_down
-    
-    def _is_lunch_break(self, current_time: datetime) -> bool:
-        """
-        判断是否为中午休市时间 (11:30-13:00)
-        """
-        from ..utils.market_time import market_time_manager
-        if not market_time_manager.is_trading_day(current_time.date()):
-            return False
-            
-        current_time_only = current_time.time()
-        lunch_start = dt_time(11, 30)
-        lunch_end = dt_time(13, 0)
-        
-        return lunch_start <= current_time_only <= lunch_end
-    
-    def _is_market_hours(self, current_time: datetime) -> bool:
-        """
-        判断是否在市场开放时间内（交易时间 + 午休时间）
-        包括：
-        - 9:30-11:30 (上午交易)
-        - 11:30-13:00 (午休)
-        - 13:00-15:00 (下午交易)
-        """
-        # 首先检查是否为交易日
-        from ..utils.market_time import market_time_manager
-        if not market_time_manager.is_trading_day(current_time.date()):
-            return False
-        
-        current_time_only = current_time.time()
-        
-        # 市场时间范围：9:30-15:00 (包含午休时间)
-        market_start = dt_time(9, 30)
-        market_end = dt_time(15, 0)
-        
-        return market_start <= current_time_only <= market_end
     
     def _is_cache_valid(self, cache_data: Dict) -> bool:
         """

@@ -99,24 +99,30 @@ class TradeCoordinator:
             return True, None, None  # 市价单
         
         try:
-            from ..utils.price_calculator import get_price_calculator
-            price_calc = get_price_calculator(self.storage)
+            # 使用统一的价格服务获取涨跌停价格
+            from .price_service import get_price_limit_service
+            price_service = get_price_limit_service(self.storage)
             
-            # 计算当前时间的涨跌停价格
-            price_limits = await price_calc.calculate_price_limits(stock_code, stock_name)
+            # 获取当前涨跌停价格
+            price_info = await price_service.get_limit_prices_for_trading(stock_code, stock_name)
             
-            if price_limits['limit_up'] > 0:
-                # 尝试解析价格文本
+            if price_info['limit_up'] > 0:
+                # 使用价格计算器解析价格文本
+                from ..utils.price_calculator import get_price_calculator
+                price_calc = get_price_calculator(self.storage)
+                
                 price = price_calc.parse_price_text(
                     price_text, 
-                    price_limits['limit_up'], 
-                    price_limits['limit_down']
+                    price_info['limit_up'], 
+                    price_info['limit_down']
                 )
                 if price is None:
                     return False, f"❌ 无法解析价格参数: {price_text}\n支持格式: 数字价格、涨停、跌停", None
+                
+                logger.debug(f"价格解析成功: {price_text} -> {price} (策略: {price_info.get('strategy', 'unknown')})")
                 return True, None, price
             else:
-                # 如果无法计算涨跌停，尝试按数字解析
+                # 如果无法获取涨跌停，尝试按数字解析
                 try:
                     price = float(price_text)
                     return True, None, price
