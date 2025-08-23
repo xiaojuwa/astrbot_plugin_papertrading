@@ -18,7 +18,7 @@ class StockDataService:
         self.storage = storage
         self._cache_ttl = 30  # 缓存30秒
     
-    async def get_stock_info(self, stock_code: str, use_cache: bool = True) -> Optional[StockInfo]:
+    async def get_stock_info(self, stock_code: str, use_cache: bool = True, skip_limit_calculation: bool = False) -> Optional[StockInfo]:
         """
         获取股票实时信息
         
@@ -43,7 +43,7 @@ class StockDataService:
         
         # 从东方财富API获取数据
         try:
-            stock_data = await self._fetch_stock_data_from_eastmoney(normalized_code)
+            stock_data = await self._fetch_stock_data_from_eastmoney(normalized_code, skip_limit_calculation)
             if stock_data:
                 # 保存到缓存
                 self.storage.save_market_cache(normalized_code, stock_data.to_dict())
@@ -54,7 +54,7 @@ class StockDataService:
         
         return None
     
-    async def _fetch_stock_data_from_eastmoney(self, stock_code: str) -> Optional[StockInfo]:
+    async def _fetch_stock_data_from_eastmoney(self, stock_code: str, skip_limit_calculation: bool = False) -> Optional[StockInfo]:
         """
         从东方财富API获取股票数据
         
@@ -73,13 +73,13 @@ class StockDataService:
                     return None
                 
                 # 构造StockInfo对象
-                return await self._build_stock_info(raw_data)
+                return await self._build_stock_info(raw_data, skip_limit_calculation)
                 
         except Exception as e:
             logger.error(f"从东方财富API获取数据失败 {stock_code}: {e}")
             return None
     
-    async def _build_stock_info(self, raw_data: Dict[str, Any]) -> StockInfo:
+    async def _build_stock_info(self, raw_data: Dict[str, Any], skip_limit_calculation: bool = False) -> StockInfo:
         """
         从原始数据构建StockInfo对象
         
@@ -102,7 +102,12 @@ class StockDataService:
         is_suspended = self._check_if_suspended(raw_data)
         
         # 获取涨跌停价格 - 根据交易时间选择不同的计算策略
-        limit_up, limit_down = await self._get_limit_prices(raw_data, stock_code, stock_name)
+        if skip_limit_calculation:
+            # 跳过涨跌停计算，直接使用API数据（防止递归调用）
+            limit_up = raw_data.get('limit_up', 0)
+            limit_down = raw_data.get('limit_down', 0)
+        else:
+            limit_up, limit_down = await self._get_limit_prices(raw_data, stock_code, stock_name)
         
         # 构建StockInfo对象
         stock_info = StockInfo(
@@ -345,7 +350,7 @@ class StockDataService:
                 
                 for code, raw_data in raw_data_dict.items():
                     try:
-                        stock_info = await self._build_stock_info(raw_data)
+                        stock_info = await self._build_stock_info(raw_data, skip_limit_calculation=False)
                         results[code] = stock_info
                         
                         # 保存到缓存

@@ -217,7 +217,7 @@ class PriceCalculator:
             stock_service = StockDataService(self.storage) if self.storage else None
             
             if stock_service:
-                stock_info = await stock_service.get_stock_info(stock_code)
+                stock_info = await stock_service.get_stock_info(stock_code, skip_limit_calculation=True)
                 if stock_info and hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
                     logger.debug(f"股票 {stock_code} 前一交易日收盘价: {stock_info.close_price}")
                     return stock_info.close_price
@@ -261,7 +261,7 @@ class PriceCalculator:
             stock_service = StockDataService(self.storage) if self.storage else None
             
             if stock_service:
-                stock_info = await stock_service.get_stock_info(stock_code)
+                stock_info = await stock_service.get_stock_info(stock_code, skip_limit_calculation=True)
                 if stock_info:
                     # 收盘后优先使用收盘价，如果没有则使用当前价
                     if hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
