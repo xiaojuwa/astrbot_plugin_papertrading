@@ -21,8 +21,12 @@ class PaperTradingPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         
+        # 获取插件配置
+        plugin_metadata = context.get_registered_star("papertrading")
+        plugin_config = plugin_metadata.config if plugin_metadata else None
+        
         # 初始化服务（使用依赖注入）
-        self.storage = DataStorage("papertrading", context.config_helper)
+        self.storage = DataStorage("papertrading", plugin_config)
         self.stock_service = StockDataService(self.storage)
         self.trading_engine = TradingEngine(self.storage, self.stock_service)
         self.order_monitor = OrderMonitorService(self.storage)
@@ -135,7 +139,10 @@ class PaperTradingPlugin(Star):
         """插件初始化"""
         try:
             # 根据配置决定是否启动挂单监控服务
-            monitor_interval = self.context.config_helper.get("monitor_interval", 15)
+            plugin_metadata = self.context.get_registered_star("papertrading")
+            plugin_config = plugin_metadata.config if plugin_metadata else None
+            
+            monitor_interval = plugin_config.get("monitor_interval", 15) if plugin_config else 15
             if monitor_interval > 0:
                 await self.order_monitor.start_monitoring()
             else:
@@ -209,7 +216,9 @@ class PaperTradingPlugin(Star):
             return
         
         # 创建新用户，从插件配置获取初始资金
-        initial_balance = self.context.config_helper.get('initial_balance', 1000000)
+        plugin_metadata = self.context.get_registered_star("papertrading")
+        plugin_config = plugin_metadata.config if plugin_metadata else None
+        initial_balance = plugin_config.get('initial_balance', 1000000) if plugin_config else 1000000
         
         user = User(
             user_id=user_id,

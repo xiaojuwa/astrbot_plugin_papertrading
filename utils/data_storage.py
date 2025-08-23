@@ -10,10 +10,10 @@ from astrbot.api import logger
 class DataStorage:
     """数据存储管理器"""
     
-    def __init__(self, plugin_name: str = "papertrading", config_helper=None):
+    def __init__(self, plugin_name: str = "papertrading", plugin_config=None):
         """初始化数据存储"""
         self.plugin_name = plugin_name
-        self.config_helper = config_helper
+        self.plugin_config = plugin_config
         self.data_dir = StarTools.get_data_dir(plugin_name)
         self._ensure_data_structure()
     
@@ -179,8 +179,8 @@ class DataStorage:
     
     def get_plugin_config_value(self, key: str, default=None):
         """获取插件配置值（优先从插件配置读取，回退到本地配置）"""
-        if self.config_helper:
-            return self.config_helper.get(key, default)
+        if self.plugin_config:
+            return self.plugin_config.get(key, default)
         else:
             # 回退到本地配置（向后兼容）
             config = self.get_config()
