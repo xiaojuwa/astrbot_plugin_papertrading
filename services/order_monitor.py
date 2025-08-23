@@ -379,15 +379,27 @@ class OrderMonitorService:
                     f"⏰ 成交时间: {time.strftime('%H:%M:%S')}"
                 )
             
-            # 构造消息会话（需要从用户ID推导）
-            # 注意：这里需要知道用户所在的平台和群组，简化处理使用用户ID
-            session_str = f"unknown:private:{order.user_id}"
+            # 构造正确的会话ID（从用户ID中提取）
+            # 用户ID格式: platform:sender_id:session_id
+            # 会话ID格式: platform:session_id
+            user_id_parts = order.user_id.split(':')
+            if len(user_id_parts) >= 3:
+                platform = user_id_parts[0]
+                session_id = user_id_parts[2]
+                session_str = f"{platform}:{session_id}"
+            else:
+                # 兜底处理：使用原用户ID
+                session_str = order.user_id
+                logger.warning(f"无法解析用户ID格式，使用原ID: {order.user_id}")
             
             # 发送消息
             message_chain = MessageEventResult().message(message)
-            await StarTools.send_message(session_str, message_chain)
+            success = await StarTools.send_message(session_str, message_chain)
             
-            logger.info(f"成交通知已发送给用户 {order.user_id}")
+            if success:
+                logger.info(f"成交通知已发送给用户 {order.user_id} (会话: {session_str})")
+            else:
+                logger.warning(f"成交通知发送失败，会话可能不存在: {session_str}")
             
         except Exception as e:
             logger.error(f"发送成交通知失败: {e}")

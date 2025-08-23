@@ -44,13 +44,18 @@ class Formatters:
         return "\n".join(lines)
     
     @staticmethod
-    def format_user_info(user: Dict[str, Any], positions: List[Dict[str, Any]]) -> str:
+    def format_user_info(user: Dict[str, Any], positions: List[Dict[str, Any]], frozen_funds: float = 0.0) -> str:
         """格式化用户信息（合并持仓、余额、订单查询）"""
         lines = [
             f"👤 账户信息",
             f"💰 可用余额: {Formatters.format_currency(user['balance'])}元",
             f"💎 总资产: {Formatters.format_currency(user['total_assets'])}元"
         ]
+        
+        # 如果有冻结资金，显示冻结资金信息
+        if frozen_funds > 0:
+            lines.append(f"🔒 冻结资金: {Formatters.format_currency(frozen_funds)}元 (买入挂单)")
+            lines.append(f"💳 实际可用: {Formatters.format_currency(user['balance'])}元")
         
         if positions:
             lines.append("\n📊 持仓详情:")
@@ -149,12 +154,60 @@ class Formatters:
         return "\n".join(lines)
     
     @staticmethod
+    def format_order_history(history_data: Dict[str, Any]) -> str:
+        """格式化历史订单列表"""
+        orders = history_data['orders']
+        current_page = history_data['current_page']
+        total_pages = history_data['total_pages']
+        total_count = history_data['total_count']
+        
+        if not orders:
+            return "📋 暂无历史订单记录"
+        
+        # 状态中文映射
+        status_map = {
+            'filled': '已成交',
+            'cancelled': '已撤销', 
+            'partial': '部分成交'
+        }
+        
+        lines = [f"📋 历史订单 (第{current_page}页/共{total_pages}页, 共{total_count}条):"]
+        
+        for i, order in enumerate(orders, 1):
+            order_type_icon = "🟢买入" if order['order_type'] == 'buy' else "🔴卖出"
+            status_text = status_map.get(order['status'], order['status'])
+            
+            # 根据状态选择图标
+            status_icon = "✅" if order['status'] == 'filled' else "❌" if order['status'] == 'cancelled' else "🔄"
+            
+            lines.append(
+                f"{i}. {order_type_icon} {order['stock_name']}({order['stock_code']})\n"
+                f"   {status_icon} 状态: {status_text}\n"
+                f"   💰 价格: {order['order_price']:.2f}元 数量: {order['order_volume']}股\n"
+                f"   📅 时间: {Formatters.format_timestamp(order['update_time'])}\n"
+                f"   🆔 订单号: {order['order_id']}"
+            )
+        
+        # 添加分页提示
+        if total_pages > 1:
+            page_info = []
+            if history_data['has_prev']:
+                page_info.append(f"上一页: /历史订单 {current_page - 1}")
+            if history_data['has_next']:
+                page_info.append(f"下一页: /历史订单 {current_page + 1}")
+            
+            if page_info:
+                lines.append("\n" + " | ".join(page_info))
+        
+        return "\n".join(lines)
+    
+    @staticmethod
     def format_help_message() -> str:
         """格式化帮助信息"""
         return """📖 papertrading 使用说明
 
 🚀 快速开始:
-/股票注册 - 开通交易账户
+/股票注册 - 开通模拟交易账户
 
 💰 交易指令:
 /买入 股票 数量 - 市价买入
@@ -171,9 +224,10 @@ class Formatters:
 /股票撤单 订单号 - 撤销挂单
 
 📊 查询指令:
-/股票账户 - 持仓和余额
+/股票账户 - 查询持仓、余额、订单
 /股价 股票 - 实时股价  
 /股票排行 - 群内排行
+/历史订单 - 历史成交记录
 
 ⚠️ 交易规则:
 • 最小交易单位: 100股（1手）
@@ -182,7 +236,7 @@ class Formatters:
 • 停牌股票无法交易
 • 手续费: 0.03%(最低5元)
 
-💡 贴心提示:
+💡 提示:
 • 支持股票名称模糊匹配，如"平安"、"茅台"
 • 支持隔夜挂单，非交易时间也可下单
 • 限价单支持"涨停"、"跌停"快捷输入"""

@@ -137,6 +137,81 @@ class DataStorage:
         orders = self._load_json('orders.json')
         return [order for order in orders.values() if order.get('status') == 'pending']
     
+    def get_user_pending_buy_orders(self, user_id: str) -> List[Dict[str, Any]]:
+        """获取用户待成交的买单（用于计算冻结资金）"""
+        orders = self._load_json('orders.json')
+        return [order for order in orders.values() 
+                if order.get('user_id') == user_id 
+                and order.get('status') == 'pending' 
+                and order.get('order_type') == 'buy']
+    
+    def calculate_frozen_funds(self, user_id: str) -> float:
+        """计算用户的冻结资金（买入挂单占用的资金）"""
+        pending_buy_orders = self.get_user_pending_buy_orders(user_id)
+        total_frozen = 0.0
+        
+        # 导入market_rules来计算买入金额
+        try:
+            from ..services.market_rules import MarketRulesEngine
+            market_rules = MarketRulesEngine(self)
+            
+            for order in pending_buy_orders:
+                order_volume = order.get('order_volume', 0)
+                order_price = order.get('order_price', 0)
+                if order_volume > 0 and order_price > 0:
+                    # 计算包含手续费的总成本
+                    total_cost = market_rules.calculate_buy_amount(order_volume, order_price)
+                    total_frozen += total_cost
+                    
+        except Exception as e:
+            from astrbot.api import logger
+            logger.error(f"计算冻结资金失败: {e}")
+            
+        return total_frozen
+    
+    def get_user_order_history(self, user_id: str, page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        """
+        获取用户历史订单（分页）
+        
+        Args:
+            user_id: 用户ID
+            page: 页码（从1开始）
+            page_size: 每页记录数
+            
+        Returns:
+            包含订单列表、总数、分页信息的字典
+        """
+        orders = self._load_json('orders.json')
+        
+        # 过滤用户订单，排除待成交状态
+        user_orders = [
+            order for order in orders.values() 
+            if order.get('user_id') == user_id 
+            and order.get('status') in ['filled', 'cancelled', 'partial']
+        ]
+        
+        # 按时间倒序排序
+        user_orders.sort(key=lambda x: x.get('update_time', 0), reverse=True)
+        
+        # 计算分页
+        total_count = len(user_orders)
+        total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+        
+        # 获取当前页订单
+        current_page_orders = user_orders[start_index:end_index]
+        
+        return {
+            'orders': current_page_orders,
+            'total_count': total_count,
+            'current_page': page,
+            'total_pages': total_pages,
+            'page_size': page_size,
+            'has_next': page < total_pages,
+            'has_prev': page > 1
+        }
+    
     # 持仓数据操作
     def get_positions(self, user_id: str) -> List[Dict[str, Any]]:
         """获取用户持仓"""

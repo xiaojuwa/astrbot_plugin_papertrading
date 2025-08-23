@@ -47,9 +47,9 @@ class TradingEngine:
             order_price = price
             price_type = PriceType.LIMIT
         
-        # 4. 创建订单
+        # 4. 创建订单（暂不生成订单号）
         order = Order(
-            order_id="",  # 将使用storage生成
+            order_id="",  # 验证通过后再生成
             user_id=user_id,
             stock_code=stock_code,
             stock_name=stock_info.name,
@@ -63,13 +63,14 @@ class TradingEngine:
             create_time=0,  # 将在__post_init__中生成
             update_time=0   # 将在__post_init__中生成
         )
-        # 生成简洁的五位数字订单号
-        order.set_order_id_from_storage(self.storage)
         
         # 5. 市场规则验证（包含涨停跌停检查）
         is_valid, error_msg = self.market_rules.validate_buy_order(stock_info, order, user.balance)
         if not is_valid:
             return False, error_msg, None
+        
+        # 验证通过后生成订单号
+        order.set_order_id_from_storage(self.storage)
         
         # 6. 检查交易时间
         is_trading_time = market_time_manager.is_trading_time()
@@ -124,7 +125,7 @@ class TradingEngine:
             order_price = price
             price_type = PriceType.LIMIT
         
-        # 5. 创建订单
+        # 5. 创建订单（暂不生成订单号）
         order = Order(
             order_id="",
             user_id=user_id,
@@ -140,13 +141,14 @@ class TradingEngine:
             create_time=0,
             update_time=0
         )
-        # 生成简洁的五位数字订单号
-        order.set_order_id_from_storage(self.storage)
         
         # 6. 市场规则验证（包含涨停跌停检查）
         is_valid, error_msg = self.market_rules.validate_sell_order(stock_info, order, position)
         if not is_valid:
             return False, error_msg, None
+        
+        # 验证通过后生成订单号
+        order.set_order_id_from_storage(self.storage)
         
         # 7. 检查交易时间
         is_trading_time = market_time_manager.is_trading_time()
@@ -323,7 +325,7 @@ class TradingEngine:
         return True, f"订单撤销成功！{order.stock_name} {order.order_volume}股"
     
     async def update_user_assets(self, user_id: str):
-        """更新用户总资产"""
+        """更新用户总资产（包含冻结资金）"""
         user_data = self.storage.get_user(user_id)
         if not user_data:
             return
@@ -336,8 +338,12 @@ class TradingEngine:
         for pos_data in positions:
             total_market_value += pos_data.get('market_value', 0)
         
-        # 更新总资产
-        user.update_total_assets(user.balance + total_market_value)
+        # 计算冻结资金（买入挂单占用的资金）
+        frozen_funds = self.storage.calculate_frozen_funds(user_id)
+        
+        # 更新总资产：可用余额 + 持仓市值 + 冻结资金
+        total_assets = user.balance + total_market_value + frozen_funds
+        user.update_total_assets(total_assets)
         self.storage.save_user(user_id, user.to_dict())
     
     def get_user_trading_summary(self, user_id: str) -> Dict[str, Any]:
