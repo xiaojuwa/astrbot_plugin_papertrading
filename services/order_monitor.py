@@ -42,17 +42,40 @@ class OrderMonitorService:
         logger.info("挂单监控服务已停止")
     
     async def _monitor_loop(self):
-        """监控循环"""
+        """监控循环 - 优化版本，减少不必要输出"""
         config = self.storage.get_config()
         interval = config.get('monitor_interval', 15)  # 默认15秒
+        last_trading_status = False
+        no_orders_count = 0
         
         while self._running:
             try:
-                # 只在交易时间监控
-                if self.stock_service.is_trading_time():
-                    await self._check_pending_orders()
+                is_trading = self.stock_service.is_trading_time()
+                
+                if is_trading:
+                    # 只在交易时间检查订单
+                    has_orders = await self._check_pending_orders()
+                    
+                    # 减少日志输出
+                    if not has_orders:
+                        no_orders_count += 1
+                        if no_orders_count % 10 == 1:  # 每10次检查才输出一次"无订单"日志
+                            logger.info(f"当前无待成交订单")
+                    else:
+                        no_orders_count = 0
+                    
+                    if not last_trading_status:
+                        logger.info("交易时段开始，启动订单监控")
+                        last_trading_status = True
                 else:
-                    logger.info("非交易时间，暂停挂单监控")
+                    # 非交易时间
+                    if last_trading_status:
+                        logger.info("交易时段结束，暂停订单监控")
+                        last_trading_status = False
+                    
+                    # 非交易时间检查间隔加长，节省资源
+                    await asyncio.sleep(min(interval * 4, 60))  # 最长1分钟
+                    continue
                 
                 # 等待下次检查
                 await asyncio.sleep(interval)
@@ -66,9 +89,13 @@ class OrderMonitorService:
         pending_orders = self.storage.get_pending_orders()
         
         if not pending_orders:
-            return
+            return False
         
-        logger.info(f"检查 {len(pending_orders)} 个待成交订单")
+        # 减少日志频率 - 只在订单数量变化时输出
+        order_count = len(pending_orders)
+        if not hasattr(self, '_last_order_count') or self._last_order_count != order_count:
+            logger.info(f"监控 {order_count} 个待成交订单")
+            self._last_order_count = order_count
         
         # 按股票代码分组，减少API调用
         stock_groups = {}
@@ -79,19 +106,34 @@ class OrderMonitorService:
             stock_groups[stock_code].append(order_data)
         
         # 逐个股票检查
+        filled_orders = 0
         for stock_code, orders in stock_groups.items():
             try:
-                await self._check_orders_for_stock(stock_code, orders)
+                filled_count = await self._check_orders_for_stock(stock_code, orders)
+                filled_orders += filled_count
             except Exception as e:
-                logger.info(f"检查股票 {stock_code} 的订单时出错: {e}")
+                logger.warning(f"检查股票 {stock_code} 的订单时出错: {e}")
+        
+        # 有成交时输出信息
+        if filled_orders > 0:
+            logger.info(f"本轮检查完成，成交 {filled_orders} 个订单")
+        
+        return True
     
-    async def _check_orders_for_stock(self, stock_code: str, orders: List[dict]):
+    async def _check_orders_for_stock(self, stock_code: str, orders: List[dict]) -> int:
         """检查特定股票的订单"""
+        filled_count = 0
+        
         # 获取最新股价
         stock_info = await self.stock_service.get_stock_info(stock_code)
         if not stock_info:
-            logger.info(f"无法获取股票 {stock_code} 的信息")
-            return
+            # 减少错误日志频率
+            if not hasattr(self, '_stock_error_count'):
+                self._stock_error_count = {}
+            if self._stock_error_count.get(stock_code, 0) % 5 == 0:
+                logger.warning(f"无法获取股票 {stock_code} 的信息")
+            self._stock_error_count[stock_code] = self._stock_error_count.get(stock_code, 0) + 1
+            return filled_count
         
         # 检查每个订单
         for order_data in orders:
@@ -101,9 +143,12 @@ class OrderMonitorService:
                 # 检查是否可以成交
                 if self._can_fill_order(order, stock_info):
                     await self._fill_order(order, stock_info)
+                    filled_count += 1
             
             except Exception as e:
-                logger.info(f"处理订单 {order_data.get('order_id', 'unknown')} 时出错: {e}")
+                logger.warning(f"处理订单 {order_data.get('order_id', 'unknown')} 时出错: {e}")
+        
+        return filled_count
     
     def _can_fill_order(self, order: Order, stock_info) -> bool:
         """检查订单是否可以成交（简化逻辑）"""

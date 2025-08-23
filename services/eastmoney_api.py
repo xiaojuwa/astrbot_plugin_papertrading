@@ -82,7 +82,7 @@ class EastMoneyAPIService:
             'input': code,
             'type': '14',
             'token': 'D43BF722C8E33BDC906FB84D85E326E8',
-            'count': '4'
+            'count': '10'  # 增加搜索结果数量，支持模糊搜索
         }
         
         try:
@@ -103,6 +103,99 @@ class EastMoneyAPIService:
             logger.error(f"搜索股票代码失败 {code}: {e}")
         
         return None
+    
+    async def search_stocks_fuzzy(self, keyword: str) -> list:
+        """
+        模糊搜索股票，支持中文名称、拼音、代码等
+        
+        Args:
+            keyword: 搜索关键词（中文名、拼音、代码等）
+            
+        Returns:
+            股票候选列表，每个元素包含 {'code', 'name', 'market'}
+        """
+        # 先检查是否为有效的股票代码
+        if keyword.isdigit() and len(keyword) == 6:
+            from ..utils.validators import Validators
+            if Validators.is_valid_stock_code(keyword):
+                # 直接返回该股票
+                stock_info = await self.get_stock_realtime_data(keyword)
+                if stock_info:
+                    return [{
+                        'code': keyword,
+                        'name': stock_info['name'],
+                        'market': self._get_market_name(keyword)
+                    }]
+        
+        # 通过搜索API进行模糊搜索
+        url = 'https://searchapi.eastmoney.com/api/suggest/get'
+        params = {
+            'input': keyword,
+            'type': '14',
+            'token': 'D43BF722C8E33BDC906FB84D85E326E8',
+            'count': '8'  # 返回8个候选结果
+        }
+        
+        try:
+            async with self.session.get(url, params=params) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    data = json.loads(text)
+                    
+                    code_list = data.get('QuotationCodeTable', {}).get('Data', [])
+                    if not code_list:
+                        return []
+                    
+                    # 过滤和整理结果
+                    candidates = []
+                    from ..utils.validators import Validators
+                    
+                    for item in code_list:
+                        quote_id = item.get('QuoteID', '')
+                        name = item.get('Name', '')
+                        security_type = item.get('SecurityTypeName', '')
+                        
+                        # 提取纯代码（去掉市场前缀）
+                        code = quote_id.split('.')[-1] if '.' in quote_id else quote_id
+                        
+                        # 只保留A股（排除债券、指数等）
+                        if (code.isdigit() and len(code) == 6 and 
+                            Validators.is_valid_stock_code(code) and
+                            security_type != '债券'):
+                            
+                            candidates.append({
+                                'code': code,
+                                'name': name,
+                                'market': self._get_market_name(code)
+                            })
+                    
+                    # 去重并限制数量
+                    seen_codes = set()
+                    unique_candidates = []
+                    for candidate in candidates:
+                        if candidate['code'] not in seen_codes:
+                            seen_codes.add(candidate['code'])
+                            unique_candidates.append(candidate)
+                            if len(unique_candidates) >= 5:  # 最多返回5个候选
+                                break
+                    
+                    return unique_candidates
+                    
+        except Exception as e:
+            logger.error(f"模糊搜索股票失败 {keyword}: {e}")
+        
+        return []
+    
+    def _get_market_name(self, code: str) -> str:
+        """获取市场名称"""
+        if code.startswith(('60', '68')):
+            return '沪市'
+        elif code.startswith(('00', '30')):
+            return '深市' if code.startswith('00') else '创业板'
+        elif code.startswith(('43', '83', '87')):
+            return '北交所'
+        else:
+            return '未知'
     
     def _get_full_security_code(self, code: str) -> str:
         """

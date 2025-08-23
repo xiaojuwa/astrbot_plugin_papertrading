@@ -194,7 +194,7 @@ class StockDataService:
     
     async def search_stock(self, keyword: str) -> list:
         """
-        搜索股票
+        搜索股票（保留原有方法）
         
         Args:
             keyword: 搜索关键词
@@ -217,6 +217,23 @@ class StockDataService:
             
         except Exception as e:
             logger.error(f"搜索股票失败: {e}")
+            return []
+    
+    async def search_stocks_fuzzy(self, keyword: str) -> list:
+        """
+        模糊搜索股票，支持中文、拼音、代码等
+        
+        Args:
+            keyword: 搜索关键词
+            
+        Returns:
+            股票候选列表: [{'code', 'name', 'market'}]
+        """
+        try:
+            async with EastMoneyAPIService() as api:
+                return await api.search_stocks_fuzzy(keyword)
+        except Exception as e:
+            logger.error(f"模糊搜索股票失败: {e}")
             return []
     
     async def batch_get_stocks(self, stock_codes: list) -> Dict[str, Optional[StockInfo]]:

@@ -40,10 +40,12 @@ class MarketRulesEngine:
     
     def validate_buy_order(self, stock_info: StockInfo, order: Order, user_balance: float) -> Tuple[bool, str]:
         """验证买入订单"""
-        # 1. 检查交易时间
-        time_valid, time_msg = self.validate_trading_time()
-        if not time_valid:
-            return False, time_msg
+        # 1. 检查交易时间（限价单可以在任何时候下单）
+        if order.is_market_order():
+            # 市价单需要在交易时间内
+            time_valid, time_msg = self.validate_trading_time()
+            if not time_valid:
+                return False, time_msg + "（市价单需要在交易时间内下单）"
         
         # 2. 检查股票是否停牌
         if stock_info.is_suspended:
@@ -74,10 +76,12 @@ class MarketRulesEngine:
     
     def validate_sell_order(self, stock_info: StockInfo, order: Order, position: Optional[Position]) -> Tuple[bool, str]:
         """验证卖出订单"""
-        # 1. 检查交易时间
-        time_valid, time_msg = self.validate_trading_time()
-        if not time_valid:
-            return False, time_msg
+        # 1. 检查交易时间（限价单可以在任何时候下单）
+        if order.is_market_order():
+            # 市价单需要在交易时间内
+            time_valid, time_msg = self.validate_trading_time()
+            if not time_valid:
+                return False, time_msg + "（市价单需要在交易时间内下单）"
         
         # 2. 检查是否有持仓
         if not position or position.is_empty():
