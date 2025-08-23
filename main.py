@@ -233,7 +233,7 @@ class PaperTradingPlugin(Star):
 
     # ==================== 交易相关 ====================
     
-    @command("市价买入")
+    @command("买入")
     async def market_buy_stock(self, event: AstrMessageEvent):
         """市价买入股票"""
         user_id = self._get_isolated_user_id(event)
@@ -246,7 +246,7 @@ class PaperTradingPlugin(Star):
         # 解析参数
         params = event.message_str.strip().split()[1:]
         if len(params) < 2:
-            yield MessageEventResult().message("❌ 参数不足\n\n格式: /市价买入 股票代码/名称 数量\n例: /市价买入 平安银行 1000")
+            yield MessageEventResult().message("❌ 参数不足\n\n格式: /买入 股票代码/名称 数量\n例: /买入 平安银行 1000")
             return
         
         keyword = params[0]
@@ -255,7 +255,7 @@ class PaperTradingPlugin(Star):
             # 市价单无需价格参数
             price_text = None
         except (ValueError, IndexError):
-            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /市价买入 股票代码/名称 数量\n例: /市价买入 平安银行 1000")
+            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /买入 股票代码/名称 数量\n例: /买入 平安银行 1000")
             return
         
         # 1. 股票搜索
@@ -432,7 +432,7 @@ class PaperTradingPlugin(Star):
             logger.error(f"买入操作失败: {e}")
             yield MessageEventResult().message("❌ 交易失败，请稍后重试")
     
-    @command("市价卖出")
+    @command("卖出")
     async def market_sell_stock(self, event: AstrMessageEvent):
         """市价卖出股票"""
         user_id = self._get_isolated_user_id(event)
@@ -445,7 +445,7 @@ class PaperTradingPlugin(Star):
         # 解析参数
         params = event.message_str.strip().split()[1:]
         if len(params) < 2:
-            yield MessageEventResult().message("❌ 参数不足\n\n格式: /市价卖出 股票代码/名称 数量\n例: /市价卖出 平安银行 500")
+            yield MessageEventResult().message("❌ 参数不足\n\n格式: /卖出 股票代码/名称 数量\n例: /卖出 平安银行 500")
             return
         
         keyword = params[0]
@@ -454,7 +454,7 @@ class PaperTradingPlugin(Star):
             # 市价单无需价格参数
             price_text = None
         except (ValueError, IndexError):
-            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /市价卖出 股票代码/名称 数量\n例: /市价卖出 平安银行 500")
+            yield MessageEventResult().message("❌ 参数格式错误\n\n格式: /卖出 股票代码/名称 数量\n例: /卖出 平安银行 500")
             return
         
         # 1. 股票搜索
