@@ -110,15 +110,14 @@ pip install -r requirements.txt
 
 欢迎提交问题报告、功能建议和代码贡献！
 
-### 代码规范
-- 遵循PEP 8编码标准
-- 添加适当的文档字符串
-- 包含必要的单元测试
-- 确保向后兼容性
 
 ## 📄 开源许可
 
 本项目采用 [GNU Affero General Public License v3.0](LICENSE) 开源许可证。
+
+## 丨感谢&参考
+
+- [SayuStock](https://github.com/KimigaiiWuyi/SayuStock) - 参考部分代码
 
 ## 🔗 相关链接
 
@@ -126,13 +125,3 @@ pip install -r requirements.txt
 - [AstrBot插件开发指南](https://docs.astrbot.app/dev/star/plugin.html)
 - [项目GitHub仓库](https://github.com/Shiroim/astrbot_plugin_papertrading)
 - [问题反馈](https://github.com/Shiroim/astrbot_plugin_papertrading/issues)
-
----
-
-<div align="center">
-
-**🚀 开始您的模拟交易之旅！**
-
-[![GitHub stars](https://img.shields.io/github/stars/Shiroim/astrbot_plugin_papertrading?style=social)](https://github.com/Shiroim/astrbot_plugin_papertrading)
-
-</div>
