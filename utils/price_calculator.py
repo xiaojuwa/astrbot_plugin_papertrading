@@ -119,6 +119,9 @@ class PriceCalculator:
         """
         获取基准收盘价（用于本地涨跌停计算）
         
+        在非交易时间，current_price实际上就是最近交易日的收盘价，
+        而API的close_price字段可能返回更早的历史收盘价。
+        
         Args:
             stock_code: 股票代码
             
@@ -132,9 +135,15 @@ class PriceCalculator:
             if stock_service:
                 # 获取股票信息，跳过涨跌停计算（防止递归调用）
                 stock_info = await stock_service.get_stock_info(stock_code, skip_limit_calculation=True)
-                if stock_info and hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
-                    logger.debug(f"股票 {stock_code} 基准收盘价: {stock_info.close_price}")
-                    return stock_info.close_price
+                if stock_info:
+                    # 优先使用current_price作为基准价格（在非交易时间，这就是最近交易日的收盘价）
+                    if hasattr(stock_info, 'current_price') and stock_info.current_price > 0:
+                        logger.debug(f"股票 {stock_code} 使用当前价作为基准收盘价: {stock_info.current_price}")
+                        return stock_info.current_price
+                    # 回退到close_price（可能不准确）
+                    elif hasattr(stock_info, 'close_price') and stock_info.close_price > 0:
+                        logger.debug(f"股票 {stock_code} 回退使用close_price: {stock_info.close_price}")
+                        return stock_info.close_price
                     
             logger.warning(f"无法获取股票 {stock_code} 的收盘价")
             return None
