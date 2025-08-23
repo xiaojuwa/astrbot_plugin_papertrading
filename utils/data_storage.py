@@ -179,7 +179,7 @@ class DataStorage:
     
     def get_plugin_config_value(self, key: str, default=None):
         """获取插件配置值（优先从插件配置读取，回退到本地配置）"""
-        if self.plugin_config:
+        if self.plugin_config and hasattr(self.plugin_config, 'get'):
             return self.plugin_config.get(key, default)
         else:
             # 回退到本地配置（向后兼容）
