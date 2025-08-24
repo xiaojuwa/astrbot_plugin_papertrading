@@ -13,10 +13,10 @@ from ..utils.formatters import Formatters
 class UserCommandHandlers:
     """用户命令处理器集合"""
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, config):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, storage):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
-        self.config = config
+        self.storage = storage
     
     async def handle_user_registration(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """用户注册"""
@@ -31,7 +31,7 @@ class UserCommandHandlers:
         
         try:
             # 创建新用户，从插件配置获取初始资金
-            initial_balance = self.config.get('initial_balance', 1000000)
+            initial_balance = self.storage.get_plugin_config_value('initial_balance', 1000000)
             
             user = User(
                 user_id=user_id,

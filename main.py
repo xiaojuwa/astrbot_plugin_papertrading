@@ -38,7 +38,8 @@ class PaperTradingPlugin(Star):
     
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context, config)
-        self.config: AstrBotConfig = context.get_config()
+        self.plugin_config = config  # 保存插件配置
+        self.astrbot_config: AstrBotConfig = context.get_config()  # AstrBot全局配置
         
         # 初始化服务层（依赖注入模式）
         self._initialize_services()
@@ -50,8 +51,8 @@ class PaperTradingPlugin(Star):
     
     def _initialize_services(self):
         """初始化服务层"""
-        # 数据存储服务
-        self.storage = DataStorage("papertrading", self.config)
+        # 数据存储服务 - 传递插件配置
+        self.storage = DataStorage("papertrading", self.plugin_config)
         
         # 股票数据服务
         self.stock_service = StockDataService(self.storage)
@@ -88,14 +89,14 @@ class PaperTradingPlugin(Star):
         self.user_handlers = UserCommandHandlers(
             self.trade_coordinator, 
             self.user_interaction, 
-            self.config
+            self.storage  # 传递storage而不是config
         )
     
     async def initialize(self):
         """插件初始化（AstrBot生命周期方法）"""
         try:
             # 启动挂单监控服务
-            monitor_interval = self.config.get("monitor_interval", 15)
+            monitor_interval = self.storage.get_plugin_config_value("monitor_interval", 15)
             if monitor_interval > 0:
                 await self.order_monitor.start_monitoring()
                 logger.info(f"挂单监控服务已启动，轮询间隔: {monitor_interval}秒")

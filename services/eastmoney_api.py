@@ -13,9 +13,9 @@ except ImportError:
 class EastMoneyAPIService:
     """东方财富API服务"""
     
-    def __init__(self, config=None):
+    def __init__(self, storage=None):
         self.session = None
-        self.config = config
+        self.storage = storage
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': '*/*',
@@ -190,8 +190,8 @@ class EastMoneyAPIService:
     
     def _get_api_token(self) -> str:
         """获取API令牌，从配置读取，留空则使用默认值"""
-        if self.config:
-            token = self.config.get('eastmoney_api_token', '').strip()
+        if self.storage:
+            token = self.storage.get_plugin_config_value('eastmoney_api_token', '').strip()
             return token if token else self._default_token
         return self._default_token
     
