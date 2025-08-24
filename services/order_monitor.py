@@ -28,6 +28,13 @@ class OrderMonitorService:
         # 在__init__中初始化所有实例属性
         self._last_order_count = 0
         self._stock_error_count = {}
+        
+        # 新增：状态跟踪属性
+        self._last_poll_time = None
+        self._last_connectivity_status = True
+        self._next_poll_time = None
+        self._connectivity_success_count = 0
+        self._connectivity_total_count = 0
     
     async def start_monitoring(self):
         """开始监控"""
@@ -74,6 +81,10 @@ class OrderMonitorService:
                 
                 is_trading = self.stock_service.is_trading_time()
                 
+                # 更新轮询状态跟踪
+                self._last_poll_time = time.time()
+                self._next_poll_time = self._last_poll_time + interval
+                
                 if is_trading:
                     # 只在交易时间检查订单
                     has_orders = await self._check_pending_orders()
@@ -96,7 +107,9 @@ class OrderMonitorService:
                         last_trading_status = False
                     
                     # 非交易时间检查间隔加长，节省资源
-                    await asyncio.sleep(min(interval * 4, 60))  # 最长1分钟
+                    sleep_duration = min(interval * 4, 60)  # 最长1分钟
+                    self._next_poll_time = self._last_poll_time + sleep_duration
+                    await asyncio.sleep(sleep_duration)
                     continue
                 
                 # 等待下次检查
@@ -131,6 +144,14 @@ class OrderMonitorService:
         # 修复N+1查询问题：批量获取所有股票的实时数据
         stock_codes = list(stock_groups.keys())
         stocks_data = await self.stock_service.batch_get_stocks(stock_codes)
+        
+        # 更新连通性状态
+        self._connectivity_total_count += 1
+        if stocks_data and len(stocks_data) > 0:
+            self._connectivity_success_count += 1
+            self._last_connectivity_status = True
+        else:
+            self._last_connectivity_status = False
         
         # 逐个股票检查，使用已批量获取的数据
         filled_orders = 0
@@ -173,20 +194,43 @@ class OrderMonitorService:
         
         return filled_count
     
-    async def _check_orders_for_stock(self, stock_code: str, orders: List[dict]) -> int:
-        """检查特定股票的订单（保留原方法以防其他地方调用）"""
-        filled_count = 0
+    def get_monitor_status(self) -> Dict[str, Any]:
+        """获取轮询监控状态信息"""
+        current_time = time.time()
         
-        # 获取最新股价
-        stock_info = await self.stock_service.get_stock_info(stock_code)
-        if not stock_info:
-            # 减少错误日志频率
-            if self._stock_error_count.get(stock_code, 0) % 5 == 0:
-                logger.warning(f"无法获取股票 {stock_code} 的信息")
-            self._stock_error_count[stock_code] = self._stock_error_count.get(stock_code, 0) + 1
-            return filled_count
+        # 计算连通性百分比
+        connectivity_rate = 0.0
+        if self._connectivity_total_count > 0:
+            connectivity_rate = (self._connectivity_success_count / self._connectivity_total_count) * 100
         
-        return await self._check_orders_for_stock_with_data(stock_code, orders, stock_info)
+        # 获取当前配置
+        current_interval = self.storage.get_plugin_config_value('monitor_interval', 15)
+        
+        # 格式化时间
+        def format_time(timestamp):
+            if timestamp is None:
+                return "未开始"
+            return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))
+        
+        # 格式化下次轮询时间
+        next_poll_display = "未知"
+        if self._next_poll_time:
+            if self._next_poll_time > current_time:
+                next_poll_display = format_time(self._next_poll_time)
+            else:
+                next_poll_display = "即将轮询"
+        
+        return {
+            'is_running': self._running,
+            'is_paused': self._paused,
+            'current_interval': current_interval,
+            'last_poll_time': format_time(self._last_poll_time),
+            'last_connectivity_status': self._last_connectivity_status,
+            'connectivity_rate': connectivity_rate,
+            'connectivity_stats': f"{self._connectivity_success_count}/{self._connectivity_total_count}",
+            'next_poll_time': next_poll_display,
+            'is_trading_time': self.stock_service.is_trading_time()
+        }
     
     def _can_fill_order(self, order: Order, stock_info) -> bool:
         """检查订单是否可以成交（简化逻辑）"""

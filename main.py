@@ -6,6 +6,7 @@ from datetime import datetime, time as dt_time, timedelta
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
 from astrbot.api.star import Context, Star
 from astrbot.api import logger, AstrBotConfig
+from astrbot.core.star.filter.permission import PermissionType
 
 # 导入重构后的处理器
 from .handlers.trading_handlers import TradingCommandHandlers
@@ -79,7 +80,8 @@ class PaperTradingPlugin(Star):
         # 查询命令处理器
         self.query_handlers = QueryCommandHandlers(
             self.trade_coordinator, 
-            self.user_interaction
+            self.user_interaction,
+            self.order_monitor
         )
         
         # 用户管理处理器
@@ -233,4 +235,13 @@ class PaperTradingPlugin(Star):
     async def show_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         async for result in self.query_handlers.handle_help(event):
+            yield result
+    
+    # ==================== 管理员命令 ====================
+    
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("轮询状态")
+    async def show_polling_status(self, event: AstrMessageEvent):
+        """显示轮询监控状态（管理员专用）"""
+        async for result in self.query_handlers.handle_polling_status(event):
             yield result

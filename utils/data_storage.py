@@ -266,11 +266,6 @@ class DataStorage:
         """保存配置"""
         self._save_json('config.json', config)
     
-    def get_config_value(self, key: str, default=None):
-        """获取配置值（向后兼容）"""
-        config = self.get_config()
-        return config.get(key, default)
-    
     def get_plugin_config_value(self, key: str, default=None):
         """获取插件配置值（优先从插件配置读取，回退到本地配置）"""
         if self.plugin_config and hasattr(self.plugin_config, 'get'):

@@ -15,9 +15,10 @@ from ..utils.validators import Validators
 class QueryCommandHandlers:
     """查询命令处理器集合"""
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, order_monitor=None):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
+        self.order_monitor = order_monitor
     
     async def handle_account_info(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """显示账户信息（合并持仓、余额、订单查询）"""
@@ -203,3 +204,48 @@ class QueryCommandHandlers:
         """显示帮助信息"""
         help_text = Formatters.format_help_message()
         yield MessageEventResult().message(help_text)
+    
+    async def handle_polling_status(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """显示轮询监控状态（管理员专用）"""
+        if not self.order_monitor:
+            yield MessageEventResult().message("❌ 轮询监控服务未初始化")
+            return
+        
+        try:
+            status = self.order_monitor.get_monitor_status()
+            
+            # 构建状态信息
+            status_text = "📊 挂单轮询监控状态\n\n"
+            
+            # 运行状态
+            if status['is_running']:
+                if status['is_paused']:
+                    status_text += "⏸️ 状态: 已暂停（间隔为0）\n"
+                else:
+                    status_text += "✅ 状态: 正在运行\n"
+            else:
+                status_text += "❌ 状态: 已停止\n"
+            
+            # 轮询配置
+            status_text += f"⏱️ 轮询间隔: {status['current_interval']}秒\n"
+            
+            # 上次轮询时间
+            status_text += f"🕒 上次轮询: {status['last_poll_time']}\n"
+            
+            # 下次轮询时间
+            status_text += f"🕓 下次轮询: {status['next_poll_time']}\n"
+            
+            # 连通性状态
+            connectivity_icon = "🟢" if status['last_connectivity_status'] else "🔴"
+            status_text += f"{connectivity_icon} 连通性: {'正常' if status['last_connectivity_status'] else '异常'}\n"
+            status_text += f"📈 连通成功率: {status['connectivity_rate']:.1f}% ({status['connectivity_stats']})\n"
+            
+            # 交易时间状态
+            trading_icon = "🟢" if status['is_trading_time'] else "⭕"
+            status_text += f"{trading_icon} 交易时间: {'是' if status['is_trading_time'] else '否'}"
+            
+            yield MessageEventResult().message(status_text)
+            
+        except Exception as e:
+            logger.error(f"获取轮询状态失败: {e}")
+            yield MessageEventResult().message("❌ 获取轮询状态失败，请稍后重试")
