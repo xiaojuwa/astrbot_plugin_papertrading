@@ -163,3 +163,60 @@ class TitleService:
             '巴菲特': '🧙‍♂️'
         }
         return emoji_map.get(title, '❓')
+    
+    def get_title_progress(self, user_id: str) -> Dict[str, Any]:
+        """获取称号进度信息"""
+        try:
+            stats = await self._get_user_trading_stats(user_id)
+            current_title = self._determine_title(stats)
+            
+            # 找到下一个称号
+            next_title = None
+            next_requirements = None
+            
+            titles = list(TITLE_RULES.keys())
+            current_index = titles.index(current_title) if current_title in titles else 0
+            
+            if current_index < len(titles) - 1:
+                next_title = titles[current_index + 1]
+                next_requirements = TITLE_RULES[next_title]
+            
+            return {
+                'current_title': current_title,
+                'next_title': next_title,
+                'next_requirements': next_requirements,
+                'current_stats': stats,
+                'progress': self._calculate_progress(stats, next_requirements) if next_requirements else None
+            }
+        except Exception as e:
+            logger.error(f"获取称号进度失败 {user_id}: {e}")
+            return {
+                'current_title': '新手',
+                'next_title': None,
+                'next_requirements': None,
+                'current_stats': {'total_profit': 0, 'total_trades': 0, 'win_rate': 0, 'initial_balance': 1000000},
+                'progress': None
+            }
+    
+    def _calculate_progress(self, stats: Dict[str, Any], next_requirements: Dict[str, Any]) -> Dict[str, Any]:
+        """计算到下一个称号的进度"""
+        total_profit = stats.get('total_profit', 0)
+        total_trades = stats.get('total_trades', 0)
+        initial_balance = stats.get('initial_balance', 1000000)
+        profit_rate = total_profit / initial_balance if initial_balance > 0 else 0
+        
+        # 计算收益率进度
+        profit_rate_progress = 0
+        if next_requirements['min_profit_rate'] > 0:
+            profit_rate_progress = min(100, (profit_rate / next_requirements['min_profit_rate']) * 100)
+        elif next_requirements['min_profit_rate'] <= 0 and profit_rate >= next_requirements['min_profit_rate']:
+            profit_rate_progress = 100
+        
+        # 计算交易次数进度
+        trades_progress = min(100, (total_trades / next_requirements['min_trades']) * 100) if next_requirements['min_trades'] > 0 else 100
+        
+        return {
+            'profit_rate_progress': max(0, profit_rate_progress),
+            'trades_progress': max(0, trades_progress),
+            'overall_progress': min(profit_rate_progress, trades_progress)
+        }

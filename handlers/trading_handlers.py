@@ -7,19 +7,21 @@ from .base_trading_handler import BuyOrderHandler, SellOrderHandler
 from ..services.trade_coordinator import TradeCoordinator
 from ..services.user_interaction import UserInteractionService
 from ..services.trading_engine import TradingEngine
+from ..services.title_service import TitleService
 
 
 class TradingCommandHandlers:
     """交易命令处理器集合"""
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, trading_engine: TradingEngine):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, trading_engine: TradingEngine, title_service: TitleService = None):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
         self.trading_engine = trading_engine
+        self.title_service = title_service
         
         # 移除冗余子类，直接实例化基类并传入描述信息
-        self.buy_handler = BuyOrderHandler(trade_coordinator, user_interaction, trading_engine)
-        self.sell_handler = SellOrderHandler(trade_coordinator, user_interaction, trading_engine)
+        self.buy_handler = BuyOrderHandler(trade_coordinator, user_interaction, trading_engine, title_service)
+        self.sell_handler = SellOrderHandler(trade_coordinator, user_interaction, trading_engine, title_service)
     
     async def handle_market_buy(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """市价买入处理"""

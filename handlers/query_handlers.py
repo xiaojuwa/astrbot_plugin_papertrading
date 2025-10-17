@@ -1,5 +1,6 @@
 """查询命令处理器 - 处理所有查询相关命令"""
 import asyncio
+from datetime import datetime
 from typing import AsyncGenerator, List, Dict, Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
@@ -164,7 +165,7 @@ class QueryCommandHandlers:
                 yield MessageEventResult().message("📊 当前群聊暂无用户排行数据\n请先使用 /股票注册 注册账户")
                 return
             
-            ranking_text = Formatters.format_ranking(users_list, current_user_id)
+            ranking_text = Formatters.format_ranking(users_list, current_user_id, self.title_service)
             yield MessageEventResult().message(ranking_text)
             
         except Exception as e:
@@ -394,30 +395,70 @@ class QueryCommandHandlers:
         user_id = self.trade_coordinator.get_isolated_user_id(event)
         
         try:
-            user_title = await self.title_service.get_user_title(user_id)
-            if not user_title:
-                yield MessageEventResult().message("❌ 您还没有称号，请先进行交易")
-                return
+            # 先更新称号
+            await self.title_service.update_user_title(user_id)
             
-            emoji = self.title_service.get_title_emoji(user_title.current_title)
-            description = user_title.get_title_description()
+            # 获取称号进度信息
+            progress_info = self.title_service.get_title_progress(user_id)
+            current_title = progress_info['current_title']
+            next_title = progress_info['next_title']
+            next_requirements = progress_info['next_requirements']
+            current_stats = progress_info['current_stats']
+            progress = progress_info['progress']
+            
+            emoji = self.title_service.get_title_emoji(current_title)
+            description = self._get_title_description(current_title)
             
             message = f"""
 🏆 我的称号
 ━━━━━━━━━━━━━━━━━━━━
-{emoji} 当前称号: {user_title.current_title}
+{emoji} 当前称号: {current_title}
 📝 称号描述: {description}
-💰 总盈亏: {user_title.total_profit:.2f}元
-📊 交易次数: {user_title.total_trades}次
-🎯 胜率: {user_title.win_rate:.1%}
+💰 总盈亏: {current_stats['total_profit']:.2f}元
+📊 交易次数: {current_stats['total_trades']}次
+🎯 胜率: {current_stats['win_rate']:.1%}
 ━━━━━━━━━━━━━━━━━━━━
             """
+            
+            # 添加下一个称号的进度信息
+            if next_title and next_requirements and progress:
+                profit_rate_needed = next_requirements['min_profit_rate']
+                trades_needed = next_requirements['min_trades']
+                
+                message += f"""
+🎯 下一个称号: {next_title}
+━━━━━━━━━━━━━━━━━━━━
+📈 需要收益率: {profit_rate_needed:.1%} (当前: {current_stats['total_profit']/current_stats['initial_balance']*100:.1%})
+📊 需要交易次数: {trades_needed}次 (当前: {current_stats['total_trades']}次)
+⏳ 整体进度: {progress['overall_progress']:.1f}%
+━━━━━━━━━━━━━━━━━━━━
+                """
+            elif current_title == '巴菲特':
+                message += """
+🎉 恭喜！您已达到最高称号！
+━━━━━━━━━━━━━━━━━━━━
+您已经是价值投资大师了！
+━━━━━━━━━━━━━━━━━━━━
+                """
             
             yield MessageEventResult().message(message.strip())
             
         except Exception as e:
             logger.error(f"获取称号失败: {e}")
             yield MessageEventResult().message("❌ 获取称号失败，请稍后重试")
+    
+    def _get_title_description(self, title: str) -> str:
+        """获取称号描述"""
+        descriptions = {
+            '新手': '刚入市的小白',
+            '韭菜': '被割的韭菜',
+            '小散': '小散户',
+            '股民': '普通股民',
+            '高手': '交易高手',
+            '股神': '股神附体',
+            '巴菲特': '价值投资大师'
+        }
+        return descriptions.get(title, '未知称号')
     
     async def handle_title_ranking(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """显示称号排行榜"""

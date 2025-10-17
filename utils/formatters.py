@@ -127,7 +127,7 @@ class Formatters:
         return "\n".join(lines)
     
     @staticmethod
-    def format_ranking(users_data: List[Dict[str, Any]], current_user_id: str = None) -> str:
+    def format_ranking(users_data: List[Dict[str, Any]], current_user_id: str = None, title_service=None) -> str:
         """格式化排行榜"""
         if not users_data:
             return "📊 暂无排行数据"
@@ -135,21 +135,165 @@ class Formatters:
         # 按总资产排序
         sorted_users = sorted(users_data, key=lambda x: x.get('total_assets', 0), reverse=True)
         
-        lines = ["🏆 群内排行榜 (按总资产):"]
+        lines = ["🏆 群内财富排行榜 🏆"]
+        lines.append("=" * 50)
         
-        for i, user in enumerate(sorted_users[:10], 1):  # 显示前10名
-            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            profit_loss = user.get('total_assets', 0) - 1000000  # 减去初始资金
-            profit_color = "🟢" if profit_loss >= 0 else "🔴"
+        # 统计信息
+        total_users = len(sorted_users)
+        total_assets = sum(user.get('total_assets', 0) for user in sorted_users)
+        avg_assets = total_assets / total_users if total_users > 0 else 0
+        
+        lines.append(f"👥 参与人数: {total_users}人")
+        lines.append(f"💰 总资产: {Formatters.format_currency(total_assets)}元")
+        lines.append(f"📊 平均资产: {Formatters.format_currency(avg_assets)}元")
+        lines.append("=" * 50)
+        
+        # 排行榜
+        for i, user in enumerate(sorted_users[:15], 1):  # 显示前15名
+            # 排名图标
+            if i == 1:
+                medal = "🥇"
+                rank_icon = "👑"
+            elif i == 2:
+                medal = "🥈"
+                rank_icon = "💎"
+            elif i == 3:
+                medal = "🥉"
+                rank_icon = "💍"
+            elif i <= 5:
+                medal = f"{i}."
+                rank_icon = "⭐"
+            elif i <= 10:
+                medal = f"{i}."
+                rank_icon = "🌟"
+            else:
+                medal = f"{i}."
+                rank_icon = "✨"
+            
+            # 用户信息
+            username = user.get('username', '匿名用户')
+            total_assets = user.get('total_assets', 0)
+            profit_loss = total_assets - 1000000  # 减去初始资金
+            profit_rate = (profit_loss / 1000000) * 100 if 1000000 > 0 else 0
+            
+            # 盈亏状态
+            if profit_rate >= 10:
+                profit_status = "🚀 股神"
+                profit_color = "🟢"
+            elif profit_rate >= 5:
+                profit_status = "💪 高手"
+                profit_color = "🟢"
+            elif profit_rate >= 0:
+                profit_status = "😊 盈利"
+                profit_color = "🟢"
+            elif profit_rate >= -5:
+                profit_status = "😅 小亏"
+                profit_color = "🟡"
+            elif profit_rate >= -10:
+                profit_status = "😔 中亏"
+                profit_color = "🟠"
+            else:
+                profit_status = "😱 大亏"
+                profit_color = "🔴"
+            
+            # 获取称号
+            title_emoji = "❓"
+            title_name = "未知"
+            if title_service:
+                try:
+                    user_id = user.get('user_id')
+                    if user_id:
+                        title_data = title_service.storage.get_user_title(user_id)
+                        if title_data:
+                            title_name = title_data.get('current_title', '新手')
+                            title_emoji = title_service.get_title_emoji(title_name)
+                except:
+                    pass
             
             # 标记当前用户
-            name_marker = "👑" if user.get('user_id') == current_user_id else ""
+            name_marker = " 👈 你" if user.get('user_id') == current_user_id else ""
             
-            lines.append(
-                f"{medal} {user.get('username', '匿名用户')}{name_marker}\n"
-                f"   💎 总资产: {Formatters.format_currency(user.get('total_assets', 0))}元\n"
-                f"   {profit_color} 盈亏: {profit_loss:+.2f}元"
-            )
+            lines.append(f"{medal} {rank_icon} {username}{name_marker}")
+            lines.append(f"   💎 总资产: {Formatters.format_currency(total_assets)}元")
+            lines.append(f"   {profit_color} 盈亏: {profit_loss:+.2f}元 ({profit_rate:+.1f}%)")
+            lines.append(f"   🏷️ 称号: {title_emoji} {title_name}")
+            lines.append(f"   📈 状态: {profit_status}")
+            
+            if i < len(sorted_users[:15]):  # 不是最后一行
+                lines.append("   " + "-" * 40)
+        
+        # 当前用户排名（如果不在前15名）
+        if current_user_id:
+            current_user_rank = None
+            for i, user in enumerate(sorted_users, 1):
+                if user.get('user_id') == current_user_id:
+                    current_user_rank = i
+                    break
+            
+            if current_user_rank and current_user_rank > 15:
+                current_user = sorted_users[current_user_rank - 1]
+                lines.append("=" * 50)
+                lines.append(f"📍 你的排名: 第{current_user_rank}名")
+                lines.append(f"   💎 总资产: {Formatters.format_currency(current_user.get('total_assets', 0))}元")
+                lines.append(f"   📊 盈亏: {current_user.get('total_assets', 0) - 1000000:+.2f}元")
+        
+        lines.append("=" * 50)
+        lines.append("💡 提示: 多交易、多学习，提升你的排名！")
+        
+        return "\n".join(lines)
+    
+    @staticmethod
+    def format_user_dashboard(user_data: Dict[str, Any], title_data: Dict[str, Any] = None, rank_info: Dict[str, Any] = None) -> str:
+        """格式化用户仪表板"""
+        username = user_data.get('username', '匿名用户')
+        balance = user_data.get('balance', 0)
+        total_assets = user_data.get('total_assets', 0)
+        profit_loss = total_assets - 1000000
+        profit_rate = (profit_loss / 1000000) * 100 if 1000000 > 0 else 0
+        
+        # 盈亏状态
+        if profit_rate >= 10:
+            status_emoji = "🚀"
+            status_text = "股神附体"
+        elif profit_rate >= 5:
+            status_emoji = "💪"
+            status_text = "交易高手"
+        elif profit_rate >= 0:
+            status_emoji = "😊"
+            status_text = "小有盈利"
+        elif profit_rate >= -5:
+            status_emoji = "😅"
+            status_text = "小亏一点"
+        elif profit_rate >= -10:
+            status_emoji = "😔"
+            status_text = "需要加油"
+        else:
+            status_emoji = "😱"
+            status_text = "要冷静啊"
+        
+        lines = [
+            "🎯 用户仪表板",
+            "=" * 30,
+            f"👤 用户: {username}",
+            f"💰 现金: {Formatters.format_currency(balance)}元",
+            f"💎 总资产: {Formatters.format_currency(total_assets)}元",
+            f"📊 盈亏: {profit_loss:+.2f}元 ({profit_rate:+.1f}%)",
+            f"🎭 状态: {status_emoji} {status_text}",
+        ]
+        
+        # 称号信息
+        if title_data:
+            title_name = title_data.get('current_title', '新手')
+            title_emoji = title_data.get('title_emoji', '❓')
+            lines.append(f"🏷️ 称号: {title_emoji} {title_name}")
+        
+        # 排名信息
+        if rank_info:
+            rank = rank_info.get('rank', '未知')
+            total_players = rank_info.get('total_players', 0)
+            lines.append(f"🏆 排名: 第{rank}名 (共{total_players}人)")
+        
+        lines.append("=" * 30)
         
         return "\n".join(lines)
     
@@ -204,7 +348,7 @@ class Formatters:
     @staticmethod
     def format_help_message() -> str:
         """格式化帮助信息"""
-        return """📖 papertrading 使用说明
+        return """📖 富易聊天室 股票系统 使用说明
 
 🚀 快速开始:
 /股票注册 - 开通模拟交易账户

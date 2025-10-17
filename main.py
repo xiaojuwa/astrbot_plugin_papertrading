@@ -87,7 +87,8 @@ class PaperTradingPlugin(Star):
         self.trading_handlers = TradingCommandHandlers(
             self.trade_coordinator, 
             self.user_interaction,
-            self.trading_engine
+            self.trading_engine,
+            self.title_service
         )
         
         # 查询命令处理器
@@ -377,6 +378,7 @@ class PaperTradingPlugin(Star):
         """显示我的称号"""
         async for result in self.query_handlers.handle_my_title(event):
             yield result
+    
     
     @filter.command("称号榜")
     async def title_ranking(self, event: AstrMessageEvent):

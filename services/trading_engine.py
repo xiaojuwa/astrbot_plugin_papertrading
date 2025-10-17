@@ -226,10 +226,7 @@ class TradingEngine:
         self.storage.save_position(user.user_id, order.stock_code, position.to_dict())
         self.storage.save_order(order.order_id, order.to_dict())
         
-        # 8. 生成表情包反应
-        buy_reaction = TradingReactions.get_buy_reaction(order.stock_name, order.order_volume, order.order_price)
-        
-        return True, f"买入成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元\n{buy_reaction}", order
+        return True, f"买入成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元", order
     
     async def _execute_sell_order_immediately(self, user: User, order: Order, position: Position,
                                             stock_info: StockInfo) -> Tuple[bool, str, Order]:
@@ -237,22 +234,25 @@ class TradingEngine:
         # 1. 计算实际收入
         total_income = self.market_rules.calculate_sell_amount(order.order_volume, order.order_price)
         
-        # 2. 减少持仓
+        # 2. 保存原始买入成本（在减少持仓之前）
+        original_cost = position.avg_cost * order.order_volume
+        
+        # 3. 减少持仓
         success = position.reduce_position(order.order_volume)
         if not success:
             return False, "减少持仓失败", order
         
-        # 3. 增加资金
+        # 4. 增加资金
         user.add_balance(total_income)
         
-        # 4. 更新订单状态
+        # 5. 更新订单状态
         order.fill_order(order.order_volume, order.order_price)
         
-        # 5. 更新持仓市值
+        # 6. 更新持仓市值
         if not position.is_empty():
             position.update_market_data(stock_info.current_price)
         
-        # 6. 保存数据
+        # 7. 保存数据
         self.storage.save_user(user.user_id, user.to_dict())
         
         if position.is_empty():
@@ -262,13 +262,15 @@ class TradingEngine:
         
         self.storage.save_order(order.order_id, order.to_dict())
         
-        # 7. 计算盈亏并生成表情包反应
-        profit_amount = total_income - (position.avg_cost * order.order_volume)
-        profit_rate = profit_amount / (position.avg_cost * order.order_volume) if position.avg_cost > 0 else 0
-        sell_reaction = TradingReactions.get_sell_reaction(order.stock_name, order.order_volume, order.order_price)
-        profit_reaction = TradingReactions.get_profit_reaction(profit_rate, profit_amount, order.stock_name)
+        # 8. 计算盈亏（使用原始买入成本）
+        profit_amount = total_income - original_cost
+        profit_rate = profit_amount / original_cost if original_cost > 0 else 0
         
-        return True, f"卖出成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，到账{total_income:.2f}元\n{sell_reaction}\n{profit_reaction}", order
+        # 将盈亏信息存储到订单中，供处理器使用
+        order.profit_amount = profit_amount
+        order.profit_rate = profit_rate
+        
+        return True, f"卖出成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，到账{total_income:.2f}元", order
     
     async def _place_pending_buy_order(self, user: User, order: Order) -> Tuple[bool, str, Order]:
         """挂买单"""

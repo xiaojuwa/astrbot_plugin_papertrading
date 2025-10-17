@@ -9,6 +9,9 @@ from ..models.user import User
 from ..services.trade_coordinator import TradeCoordinator
 from ..services.user_interaction import UserInteractionService
 from ..services.trading_engine import TradingEngine
+from ..services.title_service import TitleService
+from ..utils.trading_reactions import TradingReactions
+from ..utils.formatters import Formatters
 
 
 class BaseTradingHandler(ABC):
@@ -17,10 +20,11 @@ class BaseTradingHandler(ABC):
     提供所有交易命令的公共功能
     """
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, trading_engine: TradingEngine):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, trading_engine: TradingEngine, title_service: TitleService = None):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
         self.trading_engine = trading_engine
+        self.title_service = title_service
         self._action_description = "交易操作"  # 默认描述
     
     def set_action_description(self, description: str):
@@ -243,6 +247,50 @@ class BaseTradingHandler(ABC):
         """格式化错误结果"""
         return MessageEventResult().message(f"❌ {message}")
     
+    async def show_user_dashboard(self, user: User) -> MessageEventResult:
+        """显示用户仪表板"""
+        try:
+            # 获取用户数据
+            user_data = user.to_dict()
+            
+            # 获取称号信息
+            title_data = None
+            if self.title_service:
+                try:
+                    title_info = self.title_service.storage.get_user_title(user.user_id)
+                    if title_info:
+                        title_data = {
+                            'current_title': title_info.get('current_title', '新手'),
+                            'title_emoji': self.title_service.get_title_emoji(title_info.get('current_title', '新手'))
+                        }
+                except Exception as e:
+                    logger.error(f"获取称号信息失败: {e}")
+            
+            # 获取排名信息
+            rank_info = None
+            try:
+                all_users = self.trade_coordinator.storage.get_all_users()
+                if all_users:
+                    # 按总资产排序
+                    sorted_users = sorted(all_users.values(), key=lambda x: x.get('total_assets', 0), reverse=True)
+                    for i, u in enumerate(sorted_users, 1):
+                        if u.get('user_id') == user.user_id:
+                            rank_info = {
+                                'rank': i,
+                                'total_players': len(sorted_users)
+                            }
+                            break
+            except Exception as e:
+                logger.error(f"获取排名信息失败: {e}")
+            
+            # 格式化仪表板
+            dashboard_text = Formatters.format_user_dashboard(user_data, title_data, rank_info)
+            return MessageEventResult().message(dashboard_text)
+            
+        except Exception as e:
+            logger.error(f"显示用户仪表板失败: {e}")
+            return MessageEventResult().message("❌ 显示用户信息失败")
+    
     def format_info_result(self, message: str) -> MessageEventResult:
         """格式化信息结果"""
         return MessageEventResult().message(message)
@@ -283,7 +331,20 @@ class BuyOrderHandler(BaseTradingHandler):
             )
             
             if success:
-                yield self.format_success_result(message)
+                # 添加表情包反应
+                buy_reaction = TradingReactions.get_buy_reaction(stock_info.name, volume, order.order_price)
+                yield self.format_success_result(f"{message}\n{buy_reaction}")
+                
+                # 更新称号
+                if self.title_service:
+                    try:
+                        await self.title_service.update_user_title(user.user_id)
+                    except Exception as e:
+                        logger.error(f"更新用户称号失败: {e}")
+                
+                # 显示用户仪表板
+                dashboard_result = await self.show_user_dashboard(user)
+                yield dashboard_result
             else:
                 yield self.format_error_result(message)
                 
@@ -327,7 +388,23 @@ class SellOrderHandler(BaseTradingHandler):
             )
             
             if success:
-                yield self.format_success_result(message)
+                # 添加表情包反应
+                sell_reaction = TradingReactions.get_sell_reaction(stock_info.name, volume, order.order_price)
+                profit_reaction = ""
+                if hasattr(order, 'profit_amount') and hasattr(order, 'profit_rate') and order.profit_amount is not None:
+                    profit_reaction = TradingReactions.get_profit_reaction(order.profit_rate, order.profit_amount, stock_info.name)
+                yield self.format_success_result(f"{message}\n{sell_reaction}\n{profit_reaction}")
+                
+                # 更新称号
+                if self.title_service:
+                    try:
+                        await self.title_service.update_user_title(user.user_id)
+                    except Exception as e:
+                        logger.error(f"更新用户称号失败: {e}")
+                
+                # 显示用户仪表板
+                dashboard_result = await self.show_user_dashboard(user)
+                yield dashboard_result
             else:
                 yield self.format_error_result(message)
                 

@@ -43,6 +43,8 @@ class Order:
     create_time: int                # 创建时间
     update_time: int                # 更新时间
     filled_time: Optional[int] = None  # 成交时间
+    profit_amount: Optional[float] = None  # 盈亏金额（仅卖出订单有）
+    profit_rate: Optional[float] = None   # 盈亏比例（仅卖出订单有）
     
     def __post_init__(self):
         """初始化后处理"""
