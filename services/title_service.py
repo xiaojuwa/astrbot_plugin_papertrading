@@ -164,7 +164,7 @@ class TitleService:
         }
         return emoji_map.get(title, '❓')
     
-    def get_title_progress(self, user_id: str) -> Dict[str, Any]:
+    async def get_title_progress(self, user_id: str) -> Dict[str, Any]:
         """获取称号进度信息"""
         try:
             stats = await self._get_user_trading_stats(user_id)
