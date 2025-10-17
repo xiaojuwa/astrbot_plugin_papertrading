@@ -399,7 +399,7 @@ class QueryCommandHandlers:
             await self.title_service.update_user_title(user_id)
             
             # 获取称号进度信息
-            progress_info = self.title_service.get_title_progress(user_id)
+            progress_info = await self.title_service.get_title_progress(user_id)
             current_title = progress_info['current_title']
             next_title = progress_info['next_title']
             next_requirements = progress_info['next_requirements']
