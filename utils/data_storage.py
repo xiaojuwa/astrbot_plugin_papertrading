@@ -25,6 +25,8 @@ class DataStorage:
             'orders.json': {},
             'positions.json': {},
             'market_data_cache.json': {},
+            'daily_guesses.json': {},
+            'user_titles.json': {},
             'config.json': {
                 # 保留市场时间配置（非插件配置项）
                 'market_hours': {
@@ -274,3 +276,42 @@ class DataStorage:
             # 回退到本地配置（向后兼容）
             config = self.get_config()
             return config.get(key, default)
+    
+    # 每日一猜数据操作
+    def get_daily_guess(self, date: str) -> Optional[Dict[str, Any]]:
+        """获取每日猜股记录"""
+        guesses = self._load_json('daily_guesses.json')
+        return guesses.get(date)
+    
+    def save_daily_guess(self, daily_guess):
+        """保存每日猜股记录"""
+        guesses = self._load_json('daily_guesses.json')
+        guesses[daily_guess.date] = daily_guess.to_dict()
+        self._save_json('daily_guesses.json', guesses)
+    
+    def get_all_daily_guesses(self) -> Dict[str, Any]:
+        """获取所有每日猜股记录"""
+        return self._load_json('daily_guesses.json')
+    
+    # 用户称号数据操作
+    def get_user_title(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """获取用户称号"""
+        titles = self._load_json('user_titles.json')
+        return titles.get(user_id)
+    
+    def save_user_title(self, user_id: str, title):
+        """保存用户称号"""
+        titles = self._load_json('user_titles.json')
+        titles[user_id] = title.to_dict()
+        self._save_json('user_titles.json', titles)
+    
+    def get_all_user_titles(self) -> Dict[str, Any]:
+        """获取所有用户称号"""
+        return self._load_json('user_titles.json')
+    
+    def delete_user_title(self, user_id: str):
+        """删除用户称号"""
+        titles = self._load_json('user_titles.json')
+        if user_id in titles:
+            del titles[user_id]
+            self._save_json('user_titles.json', titles)

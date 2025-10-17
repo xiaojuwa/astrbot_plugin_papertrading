@@ -8,6 +8,8 @@ from ..models.user import User
 from ..models.position import Position
 from ..services.trade_coordinator import TradeCoordinator
 from ..services.user_interaction import UserInteractionService
+from ..services.daily_guess_service import DailyGuessService
+from ..services.title_service import TitleService
 from ..utils.formatters import Formatters
 from ..utils.validators import Validators
 
@@ -15,10 +17,12 @@ from ..utils.validators import Validators
 class QueryCommandHandlers:
     """查询命令处理器集合"""
     
-    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, order_monitor=None):
+    def __init__(self, trade_coordinator: TradeCoordinator, user_interaction: UserInteractionService, order_monitor=None, daily_guess_service=None, title_service=None):
         self.trade_coordinator = trade_coordinator
         self.user_interaction = user_interaction
         self.order_monitor = order_monitor
+        self.daily_guess_service = daily_guess_service
+        self.title_service = title_service
     
     async def handle_account_info(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """显示账户信息（合并持仓、余额、订单查询）"""
@@ -249,3 +253,230 @@ class QueryCommandHandlers:
         except Exception as e:
             logger.error(f"获取轮询状态失败: {e}")
             yield MessageEventResult().message("❌ 获取轮询状态失败，请稍后重试")
+    
+    # 每日一猜相关命令
+    async def handle_daily_guess(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """显示今日猜股"""
+        if not self.daily_guess_service:
+            yield MessageEventResult().message("❌ 每日一猜功能未启用")
+            return
+        
+        try:
+            from datetime import datetime
+            today = datetime.now().strftime('%Y-%m-%d')
+            daily_guess = await self.daily_guess_service.get_daily_guess_status(today)
+            
+            if not daily_guess:
+                # 创建今日猜股
+                daily_guess = await self.daily_guess_service.create_daily_guess(today)
+            
+            # 获取板块信息（如果有的话）
+            sector_info = ""
+            if hasattr(daily_guess, 'sector') and daily_guess.sector:
+                sector_info = f"🏷️ 板块: {daily_guess.sector}\n"
+            
+            # 检查当前时间状态
+            now = datetime.now()
+            guess_start = now.replace(hour=9, minute=35, second=0, microsecond=0)
+            guess_end = now.replace(hour=15, minute=5, second=0, microsecond=0)
+            
+            if now < guess_start:
+                time_status = f"⏰ 开始时间: 09:35 (还有{int((guess_start - now).total_seconds() / 60)}分钟)"
+            elif now > guess_end:
+                time_status = "⏰ 已结束 (15:05结束)"
+            else:
+                time_status = f"⏰ 进行中 (15:05结束，还有{int((guess_end - now).total_seconds() / 60)}分钟)"
+            
+            message = f"""
+🎯 今日一猜
+━━━━━━━━━━━━━━━━━━━━
+📈 股票: {daily_guess.stock_name} ({daily_guess.stock_code})
+{sector_info}💰 开盘价: {daily_guess.open_price:.2f}元
+🏆 奖励: {daily_guess.prize_amount:.0f}元
+👥 参与人数: {len(daily_guess.guesses)}人
+{time_status}
+━━━━━━━━━━━━━━━━━━━━
+💡 发送 /我猜 价格 参与猜测
+            """
+            
+            yield MessageEventResult().message(message.strip())
+            
+        except Exception as e:
+            logger.error(f"获取每日一猜失败: {e}")
+            yield MessageEventResult().message("❌ 获取每日一猜失败，请稍后重试")
+    
+    async def handle_submit_guess(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """提交猜测"""
+        if not self.daily_guess_service:
+            yield MessageEventResult().message("❌ 每日一猜功能未启用")
+            return
+        
+        user_id = self.trade_coordinator.get_isolated_user_id(event)
+        params = event.message_str.strip().split()[1:]
+        
+        if not params:
+            yield MessageEventResult().message("❌ 请提供猜测价格\n格式: /我猜 12.50")
+            return
+        
+        try:
+            guess_price = float(params[0])
+            if guess_price <= 0:
+                yield MessageEventResult().message("❌ 价格必须大于0")
+                return
+            
+            success, message = await self.daily_guess_service.submit_guess(user_id, guess_price)
+            yield MessageEventResult().message(f"{'✅' if success else '❌'} {message}")
+            
+        except ValueError:
+            yield MessageEventResult().message("❌ 价格格式错误")
+        except Exception as e:
+            logger.error(f"提交猜测失败: {e}")
+            yield MessageEventResult().message("❌ 提交猜测失败，请稍后重试")
+    
+    async def handle_guess_result(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """显示猜股结果"""
+        if not self.daily_guess_service:
+            yield MessageEventResult().message("❌ 每日一猜功能未启用")
+            return
+        
+        try:
+            from datetime import datetime
+            today = datetime.now().strftime('%Y-%m-%d')
+            daily_guess = await self.daily_guess_service.get_daily_guess_status(today)
+            
+            if not daily_guess:
+                yield MessageEventResult().message("❌ 今日猜股活动未开始")
+                return
+            
+            if not daily_guess.is_finished:
+                yield MessageEventResult().message("⏰ 猜股活动尚未结束，请等待收盘")
+                return
+            
+            # 获取排行榜
+            rankings = await self.daily_guess_service.get_guess_ranking(today)
+            
+            # 构建结果消息
+            message = f"""
+🎯 猜股结果
+━━━━━━━━━━━━━━━━━━━━
+📈 股票: {daily_guess.stock_name} ({daily_guess.stock_code})
+💰 收盘价: {daily_guess.close_price:.2f}元
+🏆 获胜者: {daily_guess.winner or '无'}
+🎁 奖励: {daily_guess.prize_amount:.0f}元
+━━━━━━━━━━━━━━━━━━━━
+            """
+            
+            if rankings:
+                message += "\n📊 排行榜:\n"
+                for i, rank in enumerate(rankings[:5], 1):
+                    user_id = rank['user_id'][:8] + "..." if len(rank['user_id']) > 8 else rank['user_id']
+                    accuracy = rank['accuracy']
+                    is_winner = rank['is_winner']
+                    winner_icon = "👑" if is_winner else ""
+                    message += f"{i}. {winner_icon} {user_id}: {rank['guess_price']:.2f}元"
+                    if accuracy is not None:
+                        message += f" (误差: {accuracy:.2f}元)"
+                    message += "\n"
+            
+            yield MessageEventResult().message(message.strip())
+            
+        except Exception as e:
+            logger.error(f"获取猜股结果失败: {e}")
+            yield MessageEventResult().message("❌ 获取猜股结果失败，请稍后重试")
+    
+    # 称号相关命令
+    async def handle_my_title(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """显示我的称号"""
+        if not self.title_service:
+            yield MessageEventResult().message("❌ 称号功能未启用")
+            return
+        
+        user_id = self.trade_coordinator.get_isolated_user_id(event)
+        
+        try:
+            user_title = await self.title_service.get_user_title(user_id)
+            if not user_title:
+                yield MessageEventResult().message("❌ 您还没有称号，请先进行交易")
+                return
+            
+            emoji = self.title_service.get_title_emoji(user_title.current_title)
+            description = user_title.get_title_description()
+            
+            message = f"""
+🏆 我的称号
+━━━━━━━━━━━━━━━━━━━━
+{emoji} 当前称号: {user_title.current_title}
+📝 称号描述: {description}
+💰 总盈亏: {user_title.total_profit:.2f}元
+📊 交易次数: {user_title.total_trades}次
+🎯 胜率: {user_title.win_rate:.1%}
+━━━━━━━━━━━━━━━━━━━━
+            """
+            
+            yield MessageEventResult().message(message.strip())
+            
+        except Exception as e:
+            logger.error(f"获取称号失败: {e}")
+            yield MessageEventResult().message("❌ 获取称号失败，请稍后重试")
+    
+    async def handle_title_ranking(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """显示称号排行榜"""
+        if not self.title_service:
+            yield MessageEventResult().message("❌ 称号功能未启用")
+            return
+        
+        try:
+            rankings = await self.title_service.get_title_ranking(10)
+            if not rankings:
+                yield MessageEventResult().message("❌ 暂无称号数据")
+                return
+            
+            message = "🏆 称号排行榜\n━━━━━━━━━━━━━━━━━━━━\n"
+            
+            for i, rank in enumerate(rankings, 1):
+                emoji = self.title_service.get_title_emoji(rank['title'])
+                user_id = rank['user_id'][:8] + "..." if len(rank['user_id']) > 8 else rank['user_id']
+                profit = rank['total_profit']
+                trades = rank['total_trades']
+                win_rate = rank['win_rate']
+                
+                message += f"{i}. {emoji} {user_id} - {rank['title']}\n"
+                message += f"   💰 盈亏: {profit:.2f}元 | 📊 交易: {trades}次 | 🎯 胜率: {win_rate:.1%}\n"
+            
+            message += "━━━━━━━━━━━━━━━━━━━━"
+            
+            yield MessageEventResult().message(message)
+            
+        except Exception as e:
+            logger.error(f"获取称号排行榜失败: {e}")
+            yield MessageEventResult().message("❌ 获取称号排行榜失败，请稍后重试")
+    
+    async def handle_stock_pool(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        """显示股票池信息"""
+        if not self.daily_guess_service:
+            yield MessageEventResult().message("❌ 每日一猜功能未启用")
+            return
+        
+        try:
+            pool_info = self.daily_guess_service.get_stock_pool_info()
+            
+            message = f"""
+📊 猜股股票池信息
+━━━━━━━━━━━━━━━━━━━━
+📈 总股票数: {pool_info['total_stocks']}只
+🏷️ 板块数量: {len(pool_info['sectors'])}个
+⏰ 猜股时间: 09:35 - 15:05
+━━━━━━━━━━━━━━━━━━━━
+📋 板块分布:
+            """
+            
+            for sector, count in pool_info['sector_counts'].items():
+                message += f"• {sector}: {count}只\n"
+            
+            message += "\n🎲 系统完全随机选择股票，保证公平性"
+            
+            yield MessageEventResult().message(message.strip())
+            
+        except Exception as e:
+            logger.error(f"获取股票池信息失败: {e}")
+            yield MessageEventResult().message("❌ 获取股票池信息失败，请稍后重试")

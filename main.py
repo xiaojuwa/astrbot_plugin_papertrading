@@ -20,6 +20,9 @@ from .services.stock_data import StockDataService
 from .services.trading_engine import TradingEngine
 from .services.order_monitor import OrderMonitorService
 from .services.market_rules import MarketRulesEngine
+from .services.daily_guess_service import DailyGuessService
+from .services.title_service import TitleService
+from .services.broadcast_service import BroadcastService
 from .utils.data_storage import DataStorage
 
 
@@ -68,6 +71,15 @@ class PaperTradingPlugin(Star):
         
         # 挂单监控服务（修复参数不匹配问题）
         self.order_monitor = OrderMonitorService(self.storage, self.stock_service)
+        
+        # 每日一猜服务
+        self.daily_guess_service = DailyGuessService(self.storage, self.stock_service)
+        
+        # 称号服务
+        self.title_service = TitleService(self.storage)
+        
+        # 播报服务
+        self.broadcast_service = BroadcastService(self.storage)
     
     def _initialize_handlers(self):
         """初始化命令处理器"""
@@ -82,7 +94,9 @@ class PaperTradingPlugin(Star):
         self.query_handlers = QueryCommandHandlers(
             self.trade_coordinator, 
             self.user_interaction,
-            self.order_monitor
+            self.order_monitor,
+            self.daily_guess_service,
+            self.title_service
         )
         
         # 用户管理处理器
@@ -162,9 +176,109 @@ class PaperTradingPlugin(Star):
             # 清理过期的市场数据缓存
             self.storage.clear_market_cache()
             
+            # 结束昨日猜股活动
+            try:
+                yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                await self.daily_guess_service.finish_daily_guess(yesterday)
+            except Exception as e:
+                logger.error(f"结束昨日猜股失败: {e}")
+            
+            # 启动播报定时任务
+            asyncio.create_task(self._broadcast_scheduler())
+            
+            # 启动猜股定时任务
+            asyncio.create_task(self._daily_guess_scheduler())
+            
             logger.info("每日维护任务完成")
         except Exception as e:
             logger.error(f"每日维护任务执行失败: {e}")
+    
+    async def _broadcast_scheduler(self):
+        """播报定时任务"""
+        while True:
+            try:
+                now = datetime.now()
+                
+                # 中午收盘播报 (11:30)
+                morning_time = datetime.combine(now.date(), dt_time(11, 30))
+                if now <= morning_time:
+                    sleep_seconds = (morning_time - now).total_seconds()
+                    await asyncio.sleep(sleep_seconds)
+                    await self._send_morning_broadcast()
+                
+                # 下午收盘播报 (15:00)
+                evening_time = datetime.combine(now.date(), dt_time(15, 0))
+                if now <= evening_time:
+                    sleep_seconds = (evening_time - now).total_seconds()
+                    await asyncio.sleep(sleep_seconds)
+                    await self._send_evening_broadcast()
+                
+                # 等待到明天
+                tomorrow = now + timedelta(days=1)
+                tomorrow_morning = datetime.combine(tomorrow.date(), dt_time(11, 30))
+                sleep_seconds = (tomorrow_morning - now).total_seconds()
+                await asyncio.sleep(sleep_seconds)
+                
+            except Exception as e:
+                logger.error(f"播报定时任务错误: {e}")
+                await asyncio.sleep(3600)
+    
+    async def _send_morning_broadcast(self):
+        """发送中午播报"""
+        try:
+            # 这里需要获取群ID，暂时跳过具体实现
+            # group_id = event.group_id  # 需要从事件中获取
+            # message = await self.broadcast_service.generate_morning_broadcast(group_id)
+            # await self._send_group_message(group_id, message)
+            logger.info("中午播报任务执行")
+        except Exception as e:
+            logger.error(f"发送中午播报失败: {e}")
+    
+    async def _send_evening_broadcast(self):
+        """发送下午播报"""
+        try:
+            # 这里需要获取群ID，暂时跳过具体实现
+            # group_id = event.group_id  # 需要从事件中获取
+            # message = await self.broadcast_service.generate_evening_broadcast(group_id)
+            # await self._send_group_message(group_id, message)
+            logger.info("下午播报任务执行")
+        except Exception as e:
+            logger.error(f"发送下午播报失败: {e}")
+    
+    async def _daily_guess_scheduler(self):
+        """猜股定时任务"""
+        while True:
+            try:
+                now = datetime.now()
+                
+                # 15:05 结束今日猜股
+                guess_end_time = datetime.combine(now.date(), dt_time(15, 5))
+                if now <= guess_end_time:
+                    sleep_seconds = (guess_end_time - now).total_seconds()
+                    await asyncio.sleep(sleep_seconds)
+                    await self._finish_today_guess()
+                
+                # 等待到明天
+                tomorrow = now + timedelta(days=1)
+                tomorrow_guess_end = datetime.combine(tomorrow.date(), dt_time(15, 5))
+                sleep_seconds = (tomorrow_guess_end - now).total_seconds()
+                await asyncio.sleep(sleep_seconds)
+                
+            except Exception as e:
+                logger.error(f"猜股定时任务错误: {e}")
+                await asyncio.sleep(3600)
+    
+    async def _finish_today_guess(self):
+        """结束今日猜股"""
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            success, message = await self.daily_guess_service.finish_daily_guess(today)
+            if success:
+                logger.info(f"今日猜股结束: {message}")
+            else:
+                logger.warning(f"结束今日猜股失败: {message}")
+        except Exception as e:
+            logger.error(f"结束今日猜股失败: {e}")
 
     # ==================== 用户管理命令 ====================
     
@@ -236,6 +350,44 @@ class PaperTradingPlugin(Star):
     async def show_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         async for result in self.query_handlers.handle_help(event):
+            yield result
+    
+    # ==================== 游戏化功能命令 ====================
+    
+    @filter.command("今日一猜")
+    async def daily_guess(self, event: AstrMessageEvent):
+        """显示今日猜股活动"""
+        async for result in self.query_handlers.handle_daily_guess(event):
+            yield result
+    
+    @filter.command("我猜")
+    async def submit_guess(self, event: AstrMessageEvent):
+        """提交猜测价格"""
+        async for result in self.query_handlers.handle_submit_guess(event):
+            yield result
+    
+    @filter.command("猜股结果")
+    async def guess_result(self, event: AstrMessageEvent):
+        """显示猜股结果"""
+        async for result in self.query_handlers.handle_guess_result(event):
+            yield result
+    
+    @filter.command("我的称号")
+    async def my_title(self, event: AstrMessageEvent):
+        """显示我的称号"""
+        async for result in self.query_handlers.handle_my_title(event):
+            yield result
+    
+    @filter.command("称号榜")
+    async def title_ranking(self, event: AstrMessageEvent):
+        """显示称号排行榜"""
+        async for result in self.query_handlers.handle_title_ranking(event):
+            yield result
+    
+    @filter.command("股票池")
+    async def stock_pool(self, event: AstrMessageEvent):
+        """显示猜股股票池信息"""
+        async for result in self.query_handlers.handle_stock_pool(event):
             yield result
     
     # ==================== 管理员命令 ====================

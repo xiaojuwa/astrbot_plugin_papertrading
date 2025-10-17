@@ -7,6 +7,7 @@ from ..models.order import Order, OrderType, OrderStatus, PriceType
 from ..models.position import Position
 from ..utils.data_storage import DataStorage
 from ..utils.market_time import market_time_manager
+from ..utils.trading_reactions import TradingReactions
 from .market_rules import MarketRulesEngine
 
 
@@ -225,7 +226,10 @@ class TradingEngine:
         self.storage.save_position(user.user_id, order.stock_code, position.to_dict())
         self.storage.save_order(order.order_id, order.to_dict())
         
-        return True, f"买入成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元", order
+        # 8. 生成表情包反应
+        buy_reaction = TradingReactions.get_buy_reaction(order.stock_name, order.order_volume, order.order_price)
+        
+        return True, f"买入成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元\n{buy_reaction}", order
     
     async def _execute_sell_order_immediately(self, user: User, order: Order, position: Position,
                                             stock_info: StockInfo) -> Tuple[bool, str, Order]:
@@ -258,7 +262,13 @@ class TradingEngine:
         
         self.storage.save_order(order.order_id, order.to_dict())
         
-        return True, f"卖出成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，到账{total_income:.2f}元", order
+        # 7. 计算盈亏并生成表情包反应
+        profit_amount = total_income - (position.avg_cost * order.order_volume)
+        profit_rate = profit_amount / (position.avg_cost * order.order_volume) if position.avg_cost > 0 else 0
+        sell_reaction = TradingReactions.get_sell_reaction(order.stock_name, order.order_volume, order.order_price)
+        profit_reaction = TradingReactions.get_profit_reaction(profit_rate, profit_amount, order.stock_name)
+        
+        return True, f"卖出成功！{order.stock_name} {order.order_volume}股，价格{order.order_price:.2f}元，到账{total_income:.2f}元\n{sell_reaction}\n{profit_reaction}", order
     
     async def _place_pending_buy_order(self, user: User, order: Order) -> Tuple[bool, str, Order]:
         """挂买单"""
