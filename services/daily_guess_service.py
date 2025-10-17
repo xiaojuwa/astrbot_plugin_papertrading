@@ -133,6 +133,8 @@ class DailyGuessService:
     
     async def submit_guess(self, user_id: str, guess_price: float) -> Tuple[bool, str]:
         """提交猜测"""
+        from ..utils.market_time import market_time_manager
+        
         today = datetime.now().strftime('%Y-%m-%d')
         daily_guess = self.storage.get_daily_guess(today)
         
@@ -143,6 +145,10 @@ class DailyGuessService:
         
         if daily_guess.is_finished:
             return False, "今日猜股活动已结束"
+        
+        # 检查是否为交易日
+        if not market_time_manager.is_trading_day():
+            return False, "今日为非交易日，猜股活动暂停"
         
         # 检查是否在猜股时间内 (9:35-15:05)
         now = datetime.now()

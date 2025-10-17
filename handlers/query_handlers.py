@@ -1,6 +1,6 @@
 """查询命令处理器 - 处理所有查询相关命令"""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import AsyncGenerator, List, Dict, Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
@@ -264,7 +264,58 @@ class QueryCommandHandlers:
         
         try:
             from datetime import datetime
+            from ..utils.market_time import market_time_manager
+            
             today = datetime.now().strftime('%Y-%m-%d')
+            now = datetime.now()
+            
+            # 检查是否为交易日
+            if not market_time_manager.is_trading_day():
+                # 非交易日提示
+                next_trading_day = None
+                for i in range(1, 8):  # 最多查找7天
+                    check_date = now.date() + timedelta(days=i)
+                    if market_time_manager.is_trading_day(check_date):
+                        next_trading_day = check_date
+                        break
+                
+                if next_trading_day:
+                    next_trading_str = next_trading_day.strftime('%Y年%m月%d日')
+                    if now.date().weekday() >= 5:  # 周末
+                        day_type = "周末"
+                    else:
+                        day_type = "节假日"
+                    
+                    message = f"""
+🎯 每日一猜
+━━━━━━━━━━━━━━━━━━━━
+📅 今日为{day_type}，非交易日
+⏰ 下次猜股时间: {next_trading_str} 09:35
+🏆 奖励: 10000元
+👥 参与人数: 0人
+━━━━━━━━━━━━━━━━━━━━
+💡 猜股活动仅在交易日进行
+📈 交易日时间: 周一至周五 (除法定节假日)
+🕘 活动时间: 09:35-15:05
+                    """
+                else:
+                    message = """
+🎯 每日一猜
+━━━━━━━━━━━━━━━━━━━━
+📅 今日为非交易日
+⏰ 猜股活动暂停
+🏆 奖励: 10000元
+👥 参与人数: 0人
+━━━━━━━━━━━━━━━━━━━━
+💡 猜股活动仅在交易日进行
+📈 交易日时间: 周一至周五 (除法定节假日)
+🕘 活动时间: 09:35-15:05
+                    """
+                
+                yield MessageEventResult().message(message.strip())
+                return
+            
+            # 交易日逻辑
             daily_guess = await self.daily_guess_service.get_daily_guess_status(today)
             
             if not daily_guess:
@@ -277,7 +328,6 @@ class QueryCommandHandlers:
                 sector_info = f"🏷️ 板块: {daily_guess.sector}\n"
             
             # 检查当前时间状态
-            now = datetime.now()
             guess_start = now.replace(hour=9, minute=35, second=0, microsecond=0)
             guess_end = now.replace(hour=15, minute=5, second=0, microsecond=0)
             
@@ -312,6 +362,55 @@ class QueryCommandHandlers:
             yield MessageEventResult().message("❌ 每日一猜功能未启用")
             return
         
+        try:
+            from datetime import datetime
+            from ..utils.market_time import market_time_manager
+            
+            # 检查是否为交易日
+            if not market_time_manager.is_trading_day():
+                # 非交易日提示
+                next_trading_day = None
+                for i in range(1, 8):  # 最多查找7天
+                    check_date = datetime.now().date() + timedelta(days=i)
+                    if market_time_manager.is_trading_day(check_date):
+                        next_trading_day = check_date
+                        break
+                
+                if next_trading_day:
+                    next_trading_str = next_trading_day.strftime('%Y年%m月%d日')
+                    if datetime.now().date().weekday() >= 5:  # 周末
+                        day_type = "周末"
+                    else:
+                        day_type = "节假日"
+                    
+                    message = f"""
+❌ 猜股活动暂停
+━━━━━━━━━━━━━━━━━━━━
+📅 今日为{day_type}，非交易日
+⏰ 下次猜股时间: {next_trading_str} 09:35
+━━━━━━━━━━━━━━━━━━━━
+💡 猜股活动仅在交易日进行
+📈 交易日时间: 周一至周五 (除法定节假日)
+🕘 活动时间: 09:35-15:05
+                    """
+                else:
+                    message = """
+❌ 猜股活动暂停
+━━━━━━━━━━━━━━━━━━━━
+📅 今日为非交易日
+⏰ 猜股活动暂停
+━━━━━━━━━━━━━━━━━━━━
+💡 猜股活动仅在交易日进行
+📈 交易日时间: 周一至周五 (除法定节假日)
+🕘 活动时间: 09:35-15:05
+                    """
+                
+                yield MessageEventResult().message(message.strip())
+                return
+        
+        except Exception as e:
+            logger.error(f"检查交易日失败: {e}")
+        
         user_id = self.trade_coordinator.get_isolated_user_id(event)
         params = event.message_str.strip().split()[1:]
         
@@ -342,6 +441,54 @@ class QueryCommandHandlers:
         
         try:
             from datetime import datetime
+            from ..utils.market_time import market_time_manager
+            
+            # 检查是否为交易日
+            if not market_time_manager.is_trading_day():
+                # 非交易日提示
+                next_trading_day = None
+                for i in range(1, 8):  # 最多查找7天
+                    check_date = datetime.now().date() + timedelta(days=i)
+                    if market_time_manager.is_trading_day(check_date):
+                        next_trading_day = check_date
+                        break
+                
+                if next_trading_day:
+                    next_trading_str = next_trading_day.strftime('%Y年%m月%d日')
+                    if datetime.now().date().weekday() >= 5:  # 周末
+                        day_type = "周末"
+                    else:
+                        day_type = "节假日"
+                    
+                    message = f"""
+❌ 猜股活动暂停
+━━━━━━━━━━━━━━━━━━━━
+📅 今日为{day_type}，非交易日
+⏰ 下次猜股时间: {next_trading_str} 09:35
+━━━━━━━━━━━━━━━━━━━━
+💡 猜股活动仅在交易日进行
+📈 交易日时间: 周一至周五 (除法定节假日)
+🕘 活动时间: 09:35-15:05
+                    """
+                else:
+                    message = """
+❌ 猜股活动暂停
+━━━━━━━━━━━━━━━━━━━━
+📅 今日为非交易日
+⏰ 猜股活动暂停
+━━━━━━━━━━━━━━━━━━━━
+💡 猜股活动仅在交易日进行
+📈 交易日时间: 周一至周五 (除法定节假日)
+🕘 活动时间: 09:35-15:05
+                    """
+                
+                yield MessageEventResult().message(message.strip())
+                return
+        
+        except Exception as e:
+            logger.error(f"检查交易日失败: {e}")
+        
+        try:
             today = datetime.now().strftime('%Y-%m-%d')
             daily_guess = await self.daily_guess_service.get_daily_guess_status(today)
             

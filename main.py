@@ -248,27 +248,62 @@ class PaperTradingPlugin(Star):
     
     async def _daily_guess_scheduler(self):
         """猜股定时任务"""
+        from .utils.market_time import market_time_manager
+        
         while True:
             try:
                 now = datetime.now()
+                today = now.date()
+                
+                # 检查是否为交易日
+                if not market_time_manager.is_trading_day(today):
+                    # 非交易日，等待到下一个交易日
+                    next_trading_day = None
+                    for i in range(1, 8):  # 最多查找7天
+                        check_date = today + timedelta(days=i)
+                        if market_time_manager.is_trading_day(check_date):
+                            next_trading_day = check_date
+                            break
+                    
+                    if next_trading_day:
+                        next_trading_time = datetime.combine(next_trading_day, dt_time(9, 35))
+                        sleep_seconds = (next_trading_time - now).total_seconds()
+                        logger.info(f"今日非交易日，等待到下一个交易日 {next_trading_day}")
+                        await asyncio.sleep(sleep_seconds)
+                    else:
+                        # 找不到下一个交易日，等待1小时后重试
+                        await asyncio.sleep(3600)
+                    continue
+                
+                # 交易日逻辑
+                today_str = today.strftime('%Y-%m-%d')
+                daily_guess = await self.daily_guess_service.get_daily_guess_status(today_str)
                 
                 # 09:35 开始今日猜股
-                guess_start_time = datetime.combine(now.date(), dt_time(9, 35))
+                guess_start_time = datetime.combine(today, dt_time(9, 35))
                 if now <= guess_start_time:
+                    # 等待到09:35
                     sleep_seconds = (guess_start_time - now).total_seconds()
                     await asyncio.sleep(sleep_seconds)
                     await self._start_today_guess()
+                elif not daily_guess:
+                    # 如果已经过了09:35但没有猜股记录，立即开始
+                    await self._start_today_guess()
                 
                 # 15:05 结束今日猜股
-                guess_end_time = datetime.combine(now.date(), dt_time(15, 5))
+                guess_end_time = datetime.combine(today, dt_time(15, 5))
                 if now <= guess_end_time:
+                    # 等待到15:05
                     sleep_seconds = (guess_end_time - now).total_seconds()
                     await asyncio.sleep(sleep_seconds)
                     await self._finish_today_guess()
+                elif daily_guess and not daily_guess.is_finished:
+                    # 如果已经过了15:05但猜股未结束，立即结束
+                    await self._finish_today_guess()
                 
                 # 等待到明天
-                tomorrow = now + timedelta(days=1)
-                tomorrow_guess_start = datetime.combine(tomorrow.date(), dt_time(9, 35))
+                tomorrow = today + timedelta(days=1)
+                tomorrow_guess_start = datetime.combine(tomorrow, dt_time(9, 35))
                 sleep_seconds = (tomorrow_guess_start - now).total_seconds()
                 await asyncio.sleep(sleep_seconds)
                 
@@ -279,6 +314,12 @@ class PaperTradingPlugin(Star):
     async def _start_today_guess(self):
         """开始今日猜股"""
         try:
+            # 检查是否为交易日
+            from .utils.market_time import market_time_manager
+            if not market_time_manager.is_trading_day():
+                logger.info("今日非交易日，跳过每日竞猜")
+                return
+            
             today = datetime.now().strftime('%Y-%m-%d')
             daily_guess = await self.daily_guess_service.create_daily_guess(today)
             if daily_guess:
@@ -306,12 +347,21 @@ class PaperTradingPlugin(Star):
     async def _finish_today_guess(self):
         """结束今日猜股"""
         try:
+            # 检查是否为交易日
+            from .utils.market_time import market_time_manager
+            if not market_time_manager.is_trading_day():
+                logger.info("今日非交易日，跳过每日竞猜结束")
+                return
+            
             today = datetime.now().strftime('%Y-%m-%d')
             success, message = await self.daily_guess_service.finish_daily_guess(today)
             if success:
                 # 获取猜股结果
                 daily_guess = await self.daily_guess_service.get_daily_guess_status(today)
                 if daily_guess:
+                    # 获取排行榜
+                    rankings = await self.daily_guess_service.get_guess_ranking(today)
+                    
                     # 生成结束消息
                     result_message = f"""
 🎯 今日一猜结果
@@ -322,8 +372,22 @@ class PaperTradingPlugin(Star):
 🎁 奖励: {daily_guess.prize_amount}元
 👥 参与人数: {len(daily_guess.guesses)}人
 ━━━━━━━━━━━━━━━━━━━━
-💡 明天09:35继续猜股！
                     """
+                    
+                    # 添加排行榜
+                    if rankings:
+                        result_message += "\n📊 排行榜:\n"
+                        for i, rank in enumerate(rankings[:5], 1):
+                            user_id = rank['user_id'][:8] + "..." if len(rank['user_id']) > 8 else rank['user_id']
+                            accuracy = rank['accuracy']
+                            is_winner = rank['is_winner']
+                            winner_icon = "👑" if is_winner else ""
+                            result_message += f"{i}. {winner_icon} {user_id}: {rank['guess_price']:.2f}元"
+                            if accuracy is not None:
+                                result_message += f" (误差: {accuracy:.2f}元)"
+                            result_message += "\n"
+                    
+                    result_message += "\n💡 明天09:35继续猜股！"
                     
                     # 发送到配置的群聊
                     await self._broadcast_to_configured_groups(result_message)
