@@ -252,6 +252,13 @@ class PaperTradingPlugin(Star):
             try:
                 now = datetime.now()
                 
+                # 09:35 开始今日猜股
+                guess_start_time = datetime.combine(now.date(), dt_time(9, 35))
+                if now <= guess_start_time:
+                    sleep_seconds = (guess_start_time - now).total_seconds()
+                    await asyncio.sleep(sleep_seconds)
+                    await self._start_today_guess()
+                
                 # 15:05 结束今日猜股
                 guess_end_time = datetime.combine(now.date(), dt_time(15, 5))
                 if now <= guess_end_time:
@@ -261,13 +268,40 @@ class PaperTradingPlugin(Star):
                 
                 # 等待到明天
                 tomorrow = now + timedelta(days=1)
-                tomorrow_guess_end = datetime.combine(tomorrow.date(), dt_time(15, 5))
-                sleep_seconds = (tomorrow_guess_end - now).total_seconds()
+                tomorrow_guess_start = datetime.combine(tomorrow.date(), dt_time(9, 35))
+                sleep_seconds = (tomorrow_guess_start - now).total_seconds()
                 await asyncio.sleep(sleep_seconds)
                 
             except Exception as e:
                 logger.error(f"猜股定时任务错误: {e}")
                 await asyncio.sleep(3600)
+    
+    async def _start_today_guess(self):
+        """开始今日猜股"""
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            daily_guess = await self.daily_guess_service.create_daily_guess(today)
+            if daily_guess:
+                # 生成开始消息
+                message = f"""
+🎯 今日一猜
+━━━━━━━━━━━━━━━━━━━━
+📈 股票: {daily_guess.stock_name} ({daily_guess.stock_code})
+💰 开盘价: {daily_guess.open_price:.2f}元
+🏆 奖励: {daily_guess.prize_amount}元
+👥 参与人数: 0人
+⏰ 进行中 (15:05结束)
+━━━━━━━━━━━━━━━━━━━━
+💡 发送 /我猜 价格 参与猜测
+                """
+                
+                # 发送到配置的群聊
+                await self._broadcast_to_configured_groups(message)
+                logger.info(f"今日猜股开始: {daily_guess.stock_name} ({daily_guess.stock_code})")
+            else:
+                logger.warning("创建今日猜股失败")
+        except Exception as e:
+            logger.error(f"开始今日猜股失败: {e}")
     
     async def _finish_today_guess(self):
         """结束今日猜股"""
@@ -275,11 +309,77 @@ class PaperTradingPlugin(Star):
             today = datetime.now().strftime('%Y-%m-%d')
             success, message = await self.daily_guess_service.finish_daily_guess(today)
             if success:
-                logger.info(f"今日猜股结束: {message}")
+                # 获取猜股结果
+                daily_guess = await self.daily_guess_service.get_daily_guess_status(today)
+                if daily_guess:
+                    # 生成结束消息
+                    result_message = f"""
+🎯 今日一猜结果
+━━━━━━━━━━━━━━━━━━━━
+📈 股票: {daily_guess.stock_name} ({daily_guess.stock_code})
+💰 收盘价: {daily_guess.close_price:.2f}元
+🏆 获胜者: {daily_guess.winner if daily_guess.winner else '无'}
+🎁 奖励: {daily_guess.prize_amount}元
+👥 参与人数: {len(daily_guess.guesses)}人
+━━━━━━━━━━━━━━━━━━━━
+💡 明天09:35继续猜股！
+                    """
+                    
+                    # 发送到配置的群聊
+                    await self._broadcast_to_configured_groups(result_message)
+                    logger.info(f"今日猜股结束: {message}")
             else:
                 logger.warning(f"结束今日猜股失败: {message}")
         except Exception as e:
             logger.error(f"结束今日猜股失败: {e}")
+    
+    async def _broadcast_to_configured_groups(self, message: str):
+        """向配置的群聊广播消息"""
+        try:
+            # 检查是否启用推送
+            enable_broadcast = self.storage.get_plugin_config_value('enable_daily_guess_broadcast', False)
+            if not enable_broadcast:
+                logger.info("每日一猜推送功能未启用")
+                return
+            
+            # 获取配置的群聊列表
+            broadcast_groups = self.storage.get_plugin_config_value('broadcast_groups', '')
+            if not broadcast_groups:
+                logger.info("未配置推送群聊，跳过广播")
+                return
+            
+            from astrbot.core.star.star_tools import StarTools
+            from astrbot.api.event import MessageEventResult
+            
+            # 解析群聊列表
+            group_sessions = []
+            for group_str in broadcast_groups.split(','):
+                group_str = group_str.strip()
+                if group_str:
+                    group_sessions.append(group_str)
+            
+            if not group_sessions:
+                logger.info("配置的群聊列表为空，跳过广播")
+                return
+            
+            # 向每个配置的群聊发送消息
+            success_count = 0
+            for session_id in group_sessions:
+                try:
+                    message_chain = MessageEventResult().message(message)
+                    success = await StarTools.send_message(session_id, message_chain)
+                    if success:
+                        logger.info(f"群聊广播成功: {session_id}")
+                        success_count += 1
+                    else:
+                        logger.warning(f"群聊广播失败: {session_id}")
+                except Exception as e:
+                    logger.error(f"向群聊 {session_id} 发送消息失败: {e}")
+            
+            logger.info(f"群聊广播完成，成功发送到 {success_count}/{len(group_sessions)} 个群聊")
+            
+        except Exception as e:
+            logger.error(f"群聊广播失败: {e}")
 
     # ==================== 用户管理命令 ====================
     
